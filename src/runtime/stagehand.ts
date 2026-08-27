@@ -6,6 +6,7 @@ export async function createStagehand(){
  const executablePath=process.env.CHROME_PATH||chromium.executablePath();
  const launch:any={headless:true,acceptDownloads:true,downloadsPath:path.resolve("downloads"),args:["--no-sandbox","--disable-setuid-sandbox","--disable-dev-shm-usage"],executablePath};
  const browser=await localBrowser.launch(launch);
- const stagehand=await Stagehand.create({browser,model:{modelName:model as any},logging:{level:"info"}});
+ const apiKey=process.env.GOOGLE_GENERATIVE_AI_API_KEY||process.env.OPENAI_API_KEY||process.env.ANTHROPIC_API_KEY;
+ const stagehand=await Stagehand.create({browser,model:{modelName:model as any,apiKey},logging:{level:"info"}});
  return stagehand;
 }
