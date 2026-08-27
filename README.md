@@ -11,13 +11,12 @@ Stagehand v4(LOCAL 모드) + 로컬 Chromium을 사용한 범용 웹 탐색/파�
    cp .env.example .env
    ```
 4. [console.groq.com](https://console.groq.com)에서 무료 API 키를 발급받아 `.env`의 `GROQ_API_KEY`에 채워 넣습니다.
-5. 검색어만으로 실행하려면(아래 단계 6의 두 번째 방식), [brave.com/search/api](https://brave.com/search/api/)에서 무료 API 키를 발급받아 `.env`의 `BRAVE_API_KEY`에 채워 넣습니다. (특정 사이트를 직접 지정해서 쓸 거라면 생략 가능)
-6. 실행:
+5. 실행:
    - 특정 사이트를 지정해서 그 안에서 찾기:
      ```bash
      TEST_URL=https://example.com npm run test -- "찾고 싶은 파일이나 자료 설명"
      ```
-   - 사이트를 모를 때는 검색어만으로 실행 (웹 검색으로 후보 사이트를 찾아 순서대로 시도):
+   - 사이트를 모를 때는 검색어만으로 실행 (별도 검색 API 키 없이, 기존 브라우저+LLM으로 후보 사이트를 찾아 순서대로 시도):
      ```bash
      npm run test -- "찾고 싶은 파일이나 자료 설명"
      ```
@@ -36,7 +35,7 @@ STAGEHAND_MODEL=anthropic/claude-sonnet-4-6
 
 ## 탐색 전략
 
-시작 사이트가 없으면(`TEST_URL` 미지정), 먼저 Brave Search API로 후보 사이트를 찾아 순서대로 시도합니다 (`src/discover.ts`). 사이트 방문은 목적이 아니라 원하는 콘텐츠를 얻기 위한 수단이므로, 한 후보 사이트에서 실패하면 다음 후보로 넘어갑니다.
+시작 사이트가 없으면(`TEST_URL` 미지정), 먼저 자체 검색 레이어(`src/discovery/websearch.ts`)로 후보 사이트를 찾아 순서대로 시도합니다 (`src/discover.ts`). 검색 결과 페이지를 CSS 선택자로 긁는 대신, 이미 쓰고 있는 LLM(`stagehand.extract()`)이 결과 목록을 의미적으로 읽어내므로 별도 검색 API 키가 필요 없고 마크업이 바뀌어도 잘 안 깨집니다. 사이트 방문은 목적이 아니라 원하는 콘텐츠를 얻기 위한 수단이므로, 한 후보 사이트에서 실패하면 다음 후보로 넘어갑니다.
 
 사이트 안에서는 `resolve()`가 특정 사이트 구조를 가정하지 않고, 다음 순서로 일반적인 전략을 시도합니다:
 

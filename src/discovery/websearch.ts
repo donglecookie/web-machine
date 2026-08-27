@@ -1,15 +1,52 @@
+import {z} from "zod";
 export type SearchResult={title:string;url:string};
 
-// Brave Search API - a real, ToS-compliant search API (free tier available), unlike scraping
-// a search engine's results page directly, which is fragile and often blocked by bot detection.
-export async function searchWeb(query:string):Promise<SearchResult[]>{
- const apiKey=process.env.BRAVE_API_KEY;
- if(!apiKey)throw new Error("BRAVE_API_KEY is not set. Get a free key at https://brave.com/search/api/");
- const res=await fetch(`https://api.search.brave.com/res/v1/web/search?q=${encodeURIComponent(query)}`,{
-  headers:{Accept:"application/json","X-Subscription-Token":apiKey}
- });
- if(!res.ok)throw new Error(`Brave Search API error: HTTP ${res.status}`);
- const data:any=await res.json();
- const results=(data?.web?.results||[]).map((r:any)=>({title:r.title||"",url:r.url}));
- return results.filter((r:SearchResult)=>r.url).slice(0,8);
+const RESULTS_SCHEMA=z.object({
+ results:z.array(z.object({title:z.string().nullable(),url:z.string().nullable()}))
+});
+
+// Bing wraps organic result links in a /ck/a?...&u=a1<base64url> click-tracking redirect;
+// unwrap it in case the raw href (rather than the rendered destination) comes through.
+function unwrapBingRedirect(href:string):string{
+ try{
+  const u=new URL(href);
+  if(/(^|\.)bing\.com$/.test(u.hostname)&&u.pathname==="/ck/a"){
+   let enc=u.searchParams.get("u")||"";
+   if(enc.startsWith("a1"))enc=enc.slice(2);
+   const decoded=Buffer.from(enc,"base64url").toString("utf8");
+   if(/^https?:\/\//.test(decoded))return decoded;
+  }
+ }catch{}
+ return href;
+}
+
+function isNoise(url:string):boolean{
+ try{const h=new URL(url).hostname;return /(^|\.)bing\.com$/.test(h)||/(^|\.)microsoft\.com$/.test(h);}
+ catch{return true;}
+}
+
+// Our own lightweight "Browserbase Search"-style layer: reuse the existing browser + LLM
+// (no separate search API/key) and have the model read the results page semantically instead
+// of relying on brittle CSS selectors, so it keeps working even if the markup changes.
+export async function searchWeb(page:any,stagehand:any,query:string):Promise<SearchResult[]>{
+ await page.goto(`https://www.bing.com/search?q=${encodeURIComponent(query)}`,{waitUntil:"domcontentloaded",timeout:30000});
+ await page.waitForSelector("#b_results",{timeout:10000}).catch(()=>{});
+ const extracted=await stagehand.extract(
+  "List the organic web search result titles and their destination URLs on this search results page. Ignore ads, the search engine's own navigation/help pages, and 'People also ask' boxes.",
+  RESULTS_SCHEMA,
+  {page,timeout:45000}
+ ).catch(()=>null);
+
+ const seen=new Set<string>();
+ const results=((extracted?.data?.results)||[])
+  .map((r:any)=>({title:r.title||"",url:r.url?unwrapBingRedirect(r.url):""}))
+  .filter((r:SearchResult)=>r.url&&/^https?:\/\//.test(r.url)&&!isNoise(r.url))
+  .filter((r:SearchResult)=>{if(seen.has(r.url))return false;seen.add(r.url);return true;})
+  .slice(0,8);
+
+ if(!results.length){
+  const title=await page.title().catch(()=>"?");
+  console.error(`search: extraction returned no usable results on "${title}"`);
+ }
+ return results;
 }
