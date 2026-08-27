@@ -6,11 +6,17 @@ const BLOCKED_DOMAINS=[
 ];
 export class WebMachine{
  page:any;
+ private policySet=false;
  constructor(private readonly stagehand:any){}
  async open(url:string){
-  const pages=await this.stagehand.browser.context.pages();
-  this.page=pages[0];
-  try{await this.stagehand.browser.context.setDomainPolicy({blockedDomains:BLOCKED_DOMAINS});}catch{}
+  if(!this.page){
+   const pages=await this.stagehand.browser.context.pages();
+   this.page=pages[0];
+  }
+  if(!this.policySet){
+   try{await this.stagehand.browser.context.setDomainPolicy({blockedDomains:BLOCKED_DOMAINS});}catch{}
+   this.policySet=true;
+  }
   for(let attempt=0;attempt<2;attempt++){
    try{await this.page.goto(url,{waitUntil:"domcontentloaded",timeout:30000});return;}
    catch(e){if(attempt===1)throw e;}

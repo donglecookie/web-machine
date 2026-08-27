@@ -4,7 +4,7 @@ import {searchWeb} from "./discovery/websearch.js";
 // 1. Searching the web for candidate sites likely to host it.
 // 2. Trying each candidate in turn with the same site-navigation engine (WebMachine.fetch),
 //    since visiting any particular site is just a means to the end of getting the content.
-export async function discoverAndFetch(machine:any,query:string,maxSites=3,maxStepsPerSite=10){
+export async function discoverAndFetch(machine:any,query:string,maxSites=3,maxStepsPerSite=6){
  const results=await searchWeb(machine.page,query);
  if(!results.length)return{ok:false,message:"Web search returned no candidate sites.",attempts:[]};
 
