@@ -5,7 +5,7 @@ try{
  const query=process.argv.slice(2).join(" ")||"2025학년도 9월 모의평가 사회문화 문제 PDF";
  console.log("TARGET:",target);console.log("QUERY:",query);
  await machine.open(target);
- console.log("PAGE:",machine.page.url());
+ console.log("PAGE:",await machine.page.url());
  console.log("TITLE:",await machine.page.title());
  const result=await machine.fetch(query,10);
  console.log(JSON.stringify(result,null,2));
