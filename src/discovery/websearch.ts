@@ -31,11 +31,14 @@ function isNoise(url:string):boolean{
 export async function searchWeb(page:any,stagehand:any,query:string):Promise<SearchResult[]>{
  await page.goto(`https://www.bing.com/search?q=${encodeURIComponent(query)}`,{waitUntil:"domcontentloaded",timeout:30000});
  await page.waitForSelector("#b_results",{timeout:10000}).catch(()=>{});
- const extracted=await stagehand.extract(
-  "List the organic web search result titles and their destination URLs on this search results page. Ignore ads, the search engine's own navigation/help pages, and 'People also ask' boxes.",
-  RESULTS_SCHEMA,
-  {page,timeout:45000}
- ).catch(()=>null);
+ let extracted:any=null;
+ try{
+  extracted=await stagehand.extract(
+   "List the organic web search result titles and their destination URLs on this search results page. Ignore ads, the search engine's own navigation/help pages, and 'People also ask' boxes.",
+   RESULTS_SCHEMA,
+   {page,timeout:45000}
+  );
+ }catch(e){console.error("search: extract() threw:",e instanceof Error?e.message:String(e));}
 
  const seen=new Set<string>();
  const results=((extracted?.data?.results)||[])
@@ -46,7 +49,7 @@ export async function searchWeb(page:any,stagehand:any,query:string):Promise<Sea
 
  if(!results.length){
   const title=await page.title().catch(()=>"?");
-  console.error(`search: extraction returned no usable results on "${title}"`);
+  console.error(`search: no usable results on "${title}". raw extracted.data:`,JSON.stringify(extracted?.data));
  }
  return results;
 }
