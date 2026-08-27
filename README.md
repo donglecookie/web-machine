@@ -11,10 +11,15 @@ Stagehand v4(LOCAL 모드) + 로컬 Chromium을 사용한 범용 웹 탐색/파�
    cp .env.example .env
    ```
 4. [console.groq.com](https://console.groq.com)에서 무료 API 키를 발급받아 `.env`의 `GROQ_API_KEY`에 채워 넣습니다.
-5. 실행 (시작 URL과 찾을 대상을 직접 지정):
-   ```bash
-   TEST_URL=https://example.com npm run test -- "찾고 싶은 파일이나 자료 설명"
-   ```
+5. 실행:
+   - 특정 사이트를 지정해서 그 안에서 찾기:
+     ```bash
+     TEST_URL=https://example.com npm run test -- "찾고 싶은 파일이나 자료 설명"
+     ```
+   - 사이트를 모를 때는 검색어만으로 실행 (웹 검색으로 후보 사이트를 찾아 순서대로 시도):
+     ```bash
+     npm run test -- "찾고 싶은 파일이나 자료 설명"
+     ```
 
 성공하면 `downloads/`에 파일이 저장되고, 콘솔에 URL, 파일 경로, PDF 여부, SHA-256, 탐색 이력이 출력됩니다.
 
@@ -30,7 +35,9 @@ STAGEHAND_MODEL=anthropic/claude-sonnet-4-6
 
 ## 탐색 전략
 
-`resolve()`는 특정 사이트 구조를 가정하지 않고, 다음 순서로 일반적인 전략을 시도합니다:
+시작 사이트가 없으면(`TEST_URL` 미지정), 먼저 웹 검색으로 후보 사이트를 찾아 순서대로 시도합니다 (`src/discover.ts`). 사이트 방문은 목적이 아니라 원하는 콘텐츠를 얻기 위한 수단이므로, 한 후보 사이트에서 실패하면 다음 후보로 넘어갑니다.
+
+사이트 안에서는 `resolve()`가 특정 사이트 구조를 가정하지 않고, 다음 순서로 일반적인 전략을 시도합니다:
 
 1. **직접 매칭** — 현재 페이지에서 PDF/다운로드/첨부 링크가 바로 보이면 즉시 사용 (LLM 호출 없음)
 2. **LLM 판단 (근거 기반)** — DOM에서 스캔한 링크/버튼 후보(사이트 네비게이션 메뉴 포함)를 근거로 제공하고, 다음에 클릭할 대상이나 검색 기능 사용 여부를 LLM이 판단
