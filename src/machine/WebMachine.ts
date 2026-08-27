@@ -1,17 +1,16 @@
 import {resolve} from "../files/resolver.js";import {download} from "../files/download.js";import {verify} from "../verification/file.js";
+const BLOCKED_DOMAINS=[
+ "googlesyndication.com","doubleclick.net","google-analytics.com","googletagmanager.com",
+ "adtrafficquality.google","fundingchoicesmessages.google.com","googleadservices.com",
+ "amazon-adsystem.com","facebook.net","connect.facebook.net"
+];
 export class WebMachine{
  page:any;
  constructor(private readonly stagehand:any){}
  async open(url:string){
   const pages=await this.stagehand.browser.context.pages();
   this.page=pages[0];
-  try{
-   await this.stagehand.browser.context.setDomainPolicy({blockedDomains:[
-    "googlesyndication.com","doubleclick.net","google-analytics.com","googletagmanager.com",
-    "adtrafficquality.google","fundingchoicesmessages.google.com","googleadservices.com",
-    "amazon-adsystem.com","facebook.net","connect.facebook.net"
-   ]});
-  }catch{}
+  try{await this.stagehand.browser.context.setDomainPolicy({blockedDomains:BLOCKED_DOMAINS});}catch{}
   for(let attempt=0;attempt<2;attempt++){
    try{await this.page.goto(url,{waitUntil:"domcontentloaded",timeout:30000});return;}
    catch(e){if(attempt===1)throw e;}

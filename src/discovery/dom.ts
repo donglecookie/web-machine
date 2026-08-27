@@ -11,7 +11,7 @@ const EVAL_SOURCE=`(() => {
   document.querySelectorAll("iframe[src]").forEach((e) => add("frame", e, e.src));
   return a;
 })()`;
-const MAX_CANDIDATES=40;
+const MAX_CANDIDATES=25;
 export async function inspect(page:any):Promise<Candidate[]>{
  const xs=await page.evaluate(EVAL_SOURCE);
  const scored=xs.map((x:any)=>{const s=`${x.text} ${x.url||""}`.toLowerCase();let score=0;if(/pdf|첨부|다운로드|download|문제|사회문화|사회·문화|파일|attachment/.test(s))score+=60;if(x.kind==="download")score+=40;if(/\.pdf(?:$|[?#])/i.test(x.url||""))score+=100;return{...x,score};});
