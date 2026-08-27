@@ -8,6 +8,7 @@ const EVAL_SOURCE=`(() => {
 // Uses Bing's plain HTML search results via the existing browser page - no external search API/key needed.
 export async function searchWeb(page:any,query:string):Promise<SearchResult[]>{
  await page.goto(`https://www.bing.com/search?q=${encodeURIComponent(query)}`,{waitUntil:"domcontentloaded",timeout:30000});
+ await page.waitForSelector("#b_results",{timeout:10000}).catch(()=>{});
  const raw=await page.evaluate(EVAL_SOURCE);
  const results=raw.map((r:any)=>({title:r.title,url:r.url}))
   .filter((r:any)=>r.url&&/^https?:\/\//.test(r.url)&&!r.url.includes("bing.com"))

@@ -8,7 +8,7 @@ export async function createStagehand(){
  const apiKey=API_KEY_ENV_VARS.map(k=>process.env[k]).find(Boolean);
  const modelConfig:any={modelName:model};
  if(apiKey)modelConfig.apiKey=apiKey;
- const launch:any={headless:true,acceptDownloads:true,downloadsPath:path.resolve("downloads"),args:["--no-sandbox","--disable-setuid-sandbox","--disable-dev-shm-usage"],executablePath};
+ const launch:any={headless:true,acceptDownloads:true,downloadsPath:path.resolve("downloads"),args:["--no-sandbox","--disable-setuid-sandbox","--disable-dev-shm-usage","--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"],executablePath};
  const browser=await localBrowser.launch(launch);
  return Stagehand.create({browser,model:modelConfig,logging:{level:"info"}});
 }
