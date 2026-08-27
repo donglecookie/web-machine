@@ -15,8 +15,10 @@ export async function resolve(stagehand:any,page:any,instruction:string,maxSteps
   const action=candidates.find(x=>x.kind==="button"||x.kind==="link");
   if(!action)break;
   history.push({url,action});
-  if(action.selector)await stagehand.act(`Click the element with selector ${action.selector}.`,{page});
-  else if(action.url)await page.goto(action.url,{waitUntil:"domcontentloaded"});
+  try{
+   if(action.selector)await stagehand.act(`Click the element with selector ${action.selector}.`,{page,timeout:30000});
+   else if(action.url)await page.goto(action.url,{waitUntil:"domcontentloaded",timeout:30000});
+  }catch{break;}
   await page.waitForTimeout(500);
  }
  return{ok:false,history};
