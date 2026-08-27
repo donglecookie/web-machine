@@ -9,11 +9,17 @@ const EVAL_SOURCE=`(() => {
 export async function searchWeb(page:any,query:string):Promise<SearchResult[]>{
  await page.goto(`https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`,{waitUntil:"domcontentloaded",timeout:30000});
  const raw=await page.evaluate(EVAL_SOURCE);
- return raw.map((r:any)=>{
+ const results=raw.map((r:any)=>{
   try{
    const u=new URL(r.url,"https://duckduckgo.com");
    const real=u.searchParams.get("uddg");
    return{title:r.title,url:real?decodeURIComponent(real):r.url};
   }catch{return r;}
  }).filter((r:any)=>r.url&&/^https?:\/\//.test(r.url)&&!r.url.includes("duckduckgo.com")).slice(0,8);
+ if(!results.length){
+  const title=await page.title().catch(()=>"?");
+  const url=await page.url().catch(()=>"?");
+  console.error(`search: no results parsed. landed on "${title}" (${url}), raw anchors found: ${raw.length}`);
+ }
+ return results;
 }
