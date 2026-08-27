@@ -7,7 +7,8 @@ import {readdir} from "node:fs/promises";
 //    use the site's search feature (if visible), or navigate somewhere more specific.
 // 3. Mechanical fallback: click the top-scoring unclicked candidate if the LLM step fails.
 // After any click, also check whether it triggered a native browser download (common for
-// JS-driven "download" buttons that never expose a plain href).
+// JS-driven "download" buttons that never expose a plain href), and whether it opened a new
+// tab (common for the same reason) - in which case tracking switches to that tab.
 
 const CALL_TIMEOUT=60000;
 const TOP_N_NAV=4;
@@ -40,18 +41,32 @@ async function newDownloadedFile(before:Set<string>):Promise<string|null>{
  }catch{return null;}
 }
 
+// A click can open a new tab or kill the old tab's session (common for JS-driven download
+// buttons/popups). After acting, re-sync to whichever page is actually alive/current.
+async function syncActivePage(stagehand:any,current:any):Promise<any>{
+ try{
+  const pages=await stagehand.browser.context.pages();
+  if(!pages.length)return current;
+  if(current){
+   try{if(pages.some((p:any)=>p.pageId===current.pageId))return current;}catch{}
+  }
+  return pages[pages.length-1];
+ }catch{return current;}
+}
+
 export async function resolve(stagehand:any,page:any,instruction:string,maxSteps=8){
  const history:any[]=[];
  let lastUrl:string|null=null,stuckStreak=0;
  const act=(target:any)=>stagehand.act(target,{page,timeout:CALL_TIMEOUT}).then(()=>true,()=>false);
 
  for(let i=0;i<maxSteps;i++){
-  const url=await page.url();
+  page=await syncActivePage(stagehand,page);
+  const url=await page.url().catch(()=>lastUrl||"");
   if(url===lastUrl){if(++stuckStreak>=MAX_STUCK)break;}else stuckStreak=0;
   lastUrl=url;
   if(FILE_RE.test(url))return{ok:true,url,history};
 
-  const candidates=await inspect(page);
+  const candidates=await inspect(page).catch(()=>[]);
   const direct=candidates.find(c=>c.url&&FILE_RE.test(c.url))
    ||candidates.find(c=>c.url&&sameHost(c.url,url)&&KEYWORD_RE.test(`${c.text} ${c.url}`));
   if(direct?.url){history.push({url,action:direct});return{ok:true,url:direct.url,history};}
@@ -97,6 +112,7 @@ Avoid choosing something that would leave the page unchanged.`,{page,timeout:CAL
    await page.waitForTimeout(1200);
    const downloadedFile=await newDownloadedFile(beforeFiles);
    if(downloadedFile)return{ok:true,downloadedFile,history};
+   page=await syncActivePage(stagehand,page);
   }
 
   await page.waitForTimeout(500);

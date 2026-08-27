@@ -9,10 +9,8 @@ export class WebMachine{
  private policySet=false;
  constructor(private readonly stagehand:any){}
  async open(url:string){
-  if(!this.page){
-   const pages=await this.stagehand.browser.context.pages();
-   this.page=pages[0];
-  }
+  const pages=await this.stagehand.browser.context.pages();
+  this.page=pages[pages.length-1]||this.page;
   if(!this.policySet){
    try{await this.stagehand.browser.context.setDomainPolicy({blockedDomains:BLOCKED_DOMAINS});}catch{}
    this.policySet=true;
