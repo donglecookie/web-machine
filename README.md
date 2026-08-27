@@ -1,6 +1,6 @@
 # Web Machine v9
 
-Stagehand v4(LOCAL 모드) + 로컬 Chromium을 사용한 실행 가능한 웹 탐색/PDF 다운로드 테스트 프로젝트입니다. Browserbase 클라우드 세션은 사용하지 않고, LLM 호출에는 Groq(무료 API 키)를 기본값으로 사용합니다.
+Stagehand v4(LOCAL 모드) + 로컬 Chromium을 사용한 범용 웹 탐색/파일 다운로드 엔진입니다. 특정 사이트에 종속되지 않고, 어떤 시작 URL과 검색 목표를 주더라도 그 사이트 안에서 목표 파일(주로 PDF)을 스스로 찾아 다운로드하도록 설계되었습니다. Browserbase 클라우드 세션은 사용하지 않고, LLM 호출에는 Groq(무료 API 키)를 기본값으로 사용합니다.
 
 ## GitHub Codespaces에서 실행
 
@@ -11,9 +11,9 @@ Stagehand v4(LOCAL 모드) + 로컬 Chromium을 사용한 실행 가능한 웹 �
    cp .env.example .env
    ```
 4. [console.groq.com](https://console.groq.com)에서 무료 API 키를 발급받아 `.env`의 `GROQ_API_KEY`에 채워 넣습니다.
-5. 실행:
+5. 실행 (시작 URL과 찾을 대상을 직접 지정):
    ```bash
-   npm run test -- "2025학년도 9월 모의평가 사회문화 문제 PDF"
+   TEST_URL=https://example.com npm run test -- "찾고 싶은 파일이나 자료 설명"
    ```
 
 성공하면 `downloads/`에 파일이 저장되고, 콘솔에 URL, 파일 경로, PDF 여부, SHA-256, 탐색 이력이 출력됩니다.
@@ -28,11 +28,18 @@ STAGEHAND_MODEL=openai/gpt-4o-mini
 STAGEHAND_MODEL=anthropic/claude-sonnet-4-6
 ```
 
+## 탐색 전략
+
+`resolve()`는 특정 사이트 구조를 가정하지 않고, 다음 순서로 일반적인 전략을 시도합니다:
+
+1. **직접 매칭** — 현재 페이지에서 PDF/다운로드/첨부 링크가 바로 보이면 즉시 사용 (LLM 호출 없음)
+2. **LLM 판단 (근거 기반)** — DOM에서 스캔한 링크/버튼 후보(사이트 네비게이션 메뉴 포함)를 근거로 제공하고, 다음에 클릭할 대상이나 검색 기능 사용 여부를 LLM이 판단
+3. **기계적 폴백** — LLM 판단이 실패하면 점수가 가장 높은 미방문 후보를 클릭
+
 ## 중요한 점
 
 - `SHA-256`은 파일 검증/식별용으로만 계산하며, 다른 사이트의 파일과 비교하지 않습니다.
-- 특정 사이트의 URL을 코드에 정답으로 하드코딩하지 않았습니다.
-- 엔진은 현재 페이지에서 PDF/첨부/다운로드 후보를 DOM에서 먼저 찾고, 없으면 LLM으로 의미적 탐색을 시도한 뒤, 관련 버튼/링크를 따라가며 재탐색합니다.
+- 특정 사이트의 URL이나 구조를 코드에 하드코딩하지 않았습니다.
 - Codespaces 환경에서는 headless 브라우저(`headless:true`)로 실행됩니다.
 - Chromium 실행 파일 경로가 자동으로 안 잡히면 `.env`의 `CHROME_PATH`로 직접 지정할 수 있습니다.
 
@@ -42,5 +49,5 @@ Chrome/Chromium이 설치된 환경이라면 동일하게:
 ```bash
 npm install
 npm run install-browser
-npm run test -- "2025학년도 9월 모의평가 사회문화 문제 PDF"
+TEST_URL=https://example.com npm run test -- "찾고 싶은 파일이나 자료 설명"
 ```
