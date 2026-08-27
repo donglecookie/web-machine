@@ -1,6 +1,6 @@
 import {inspect,Candidate} from "../discovery/dom.js";
 import {z} from "zod";
-const extractSchema=z.object({url:z.string().optional(),text:z.string().optional()});
+const extractSchema=z.object({url:z.string().nullable(),text:z.string().nullable()});
 export async function resolve(stagehand:any,page:any,instruction:string,maxSteps=8){
  const history:any[]=[];const seen=new Set<string>();
  for(let i=0;i<maxSteps;i++){
