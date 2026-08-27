@@ -12,13 +12,25 @@ export async function resolve(stagehand:any,page:any,instruction:string,maxSteps
   const semantic=await stagehand.extract(`Find the most relevant link, button, attachment, or downloadable PDF for: ${instruction}. Return the visible text and URL if available.`,extractSchema,{page});
   const candidate=extractCandidate(semantic?.data);
   if(candidate?.url){history.push({url,action:candidate});return{ok:true,url:candidate.url,history};}
-  const action=candidates.find(x=>(x.kind==="button"||x.kind==="link")&&!(x.url&&seen.has(x.url)));
-  if(!action)break;
-  history.push({url,action});
+  let acted=false;
   try{
-   if(action.selector)await stagehand.act(`Click the element with selector ${action.selector}.`,{page,timeout:30000});
-   else if(action.url)await page.goto(action.url,{waitUntil:"domcontentloaded",timeout:30000});
-  }catch{break;}
+   const obs=await stagehand.observe(`Find the single best link, menu item, or button on this page to click next that moves closer to finding: ${instruction}. Prefer specific categories, dates, or article links over generic/unrelated navigation. Avoid links that stay on the current page.`,{page,timeout:30000});
+   const next=obs?.data?.[0];
+   if(next?.selector){
+    history.push({url,action:{kind:"observe",text:next.description,selector:next.selector}});
+    await stagehand.act(next,{page,timeout:30000});
+    acted=true;
+   }
+  }catch{}
+  if(!acted){
+   const action=candidates.find(x=>(x.kind==="button"||x.kind==="link")&&!(x.url&&seen.has(x.url)));
+   if(!action)break;
+   history.push({url,action});
+   try{
+    if(action.selector)await stagehand.act(`Click the element with selector ${action.selector}.`,{page,timeout:30000});
+    else if(action.url)await page.goto(action.url,{waitUntil:"domcontentloaded",timeout:30000});
+   }catch{break;}
+  }
   await page.waitForTimeout(500);
  }
  return{ok:false,history};
