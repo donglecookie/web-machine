@@ -11,4 +11,7 @@ try{
  console.log(JSON.stringify(result,null,2));
  if(result.ok)console.log(`\nSUCCESS: ${result.path}`);
  else process.exitCode=1;
+}catch(e){
+ console.error("FAILED:",e instanceof Error?e.stack||e.message:e);
+ process.exitCode=1;
 }finally{await machine.close();}

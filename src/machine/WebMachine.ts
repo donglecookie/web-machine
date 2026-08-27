@@ -9,7 +9,9 @@ export class WebMachine{
   catch(e){await this.page.goto(url,{waitUntil:"domcontentloaded",timeout:30000});}
  }
  async fetch(instruction:string,maxSteps=8){
-  const found=await resolve(this.stagehand,this.page,instruction,maxSteps);
+  let found:any;
+  try{found=await resolve(this.stagehand,this.page,instruction,maxSteps);}
+  catch(e){return{ok:false,message:`resolve failed: ${e instanceof Error?e.message:String(e)}`,history:[]};}
   if(!found.ok||!found.url)return{ok:false,message:"No file URL found.",history:found.history};
   try{const file=await download(found.url);const verification=await verify(file.path);return{ok:verification.ok,url:file.url,path:file.path,verification,history:found.history};}
   catch(e){return{ok:false,url:found.url,message:e instanceof Error?e.message:String(e),history:found.history};}
