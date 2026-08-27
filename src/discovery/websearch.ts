@@ -19,7 +19,8 @@ export async function searchWeb(page:any,query:string):Promise<SearchResult[]>{
  if(!results.length){
   const title=await page.title().catch(()=>"?");
   const url=await page.url().catch(()=>"?");
-  console.error(`search: no results parsed. landed on "${title}" (${url}), raw anchors found: ${raw.length}`);
+  const snippet=await page.evaluate("document.body ? document.body.innerText.replace(/\\s+/g,' ').trim().slice(0,300) : '(no body)'").catch(()=>"?");
+  console.error(`search: no results parsed. landed on "${title}" (${url}), raw anchors: ${raw.length}, body snippet: ${JSON.stringify(snippet)}`);
  }
  return results;
 }
