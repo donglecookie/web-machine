@@ -5,7 +5,8 @@ export class WebMachine{
  async open(url:string){
   const pages=await this.stagehand.browser.context.pages();
   this.page=pages[0];
-  await this.page.goto(url,{waitUntil:"domcontentloaded"});
+  try{await this.page.goto(url,{waitUntil:"domcontentloaded",timeout:30000});}
+  catch(e){await this.page.goto(url,{waitUntil:"domcontentloaded",timeout:30000});}
  }
  async fetch(instruction:string,maxSteps=8){
   const found=await resolve(this.stagehand,this.page,instruction,maxSteps);
