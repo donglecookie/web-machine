@@ -12,7 +12,7 @@ export async function resolve(stagehand:any,page:any,instruction:string,maxSteps
   const semantic=await stagehand.extract(`Find the most relevant link, button, attachment, or downloadable PDF for: ${instruction}. Return the visible text and URL if available.`,extractSchema,{page});
   const candidate=extractCandidate(semantic?.data);
   if(candidate?.url){history.push({url,action:candidate});return{ok:true,url:candidate.url,history};}
-  const action=candidates.find(x=>x.kind==="button"||x.kind==="link");
+  const action=candidates.find(x=>(x.kind==="button"||x.kind==="link")&&!(x.url&&seen.has(x.url)));
   if(!action)break;
   history.push({url,action});
   try{
