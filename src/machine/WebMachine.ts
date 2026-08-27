@@ -12,8 +12,10 @@ export class WebMachine{
     "amazon-adsystem.com","facebook.net","connect.facebook.net"
    ]});
   }catch{}
-  try{await this.page.goto(url,{waitUntil:"domcontentloaded",timeout:30000});}
-  catch(e){await this.page.goto(url,{waitUntil:"domcontentloaded",timeout:30000});}
+  for(let attempt=0;attempt<2;attempt++){
+   try{await this.page.goto(url,{waitUntil:"domcontentloaded",timeout:30000});return;}
+   catch(e){if(attempt===1)throw e;}
+  }
  }
  async fetch(instruction:string,maxSteps=8){
   let found:any;

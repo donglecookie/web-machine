@@ -1,10 +1,16 @@
-import {inspect} from "../discovery/dom.js";
+import {inspect,Candidate} from "../discovery/dom.js";
 
-// Strategies are tried in order of generality/commonness on any content site:
-// 1. Direct match already visible on the page (PDF link / download / attachment)
-// 2. The site's own search feature, if one exists (fastest path to specific content)
-// 3. LLM-guided navigation (observe the page and pick the most promising next click)
-// 4. Mechanical DOM heuristic fallback (top-scoring unclicked link/button)
+// Strategy order (most general/common first, most site-specific last):
+// 1. Direct match already visible on the page (PDF link / download / attachment) - zero LLM calls
+// 2. One grounded LLM decision per step: given the ranked DOM candidates, either click one,
+//    use the site's search feature (if visible), or navigate somewhere more specific.
+// 3. Mechanical fallback: click the top-scoring unclicked candidate if the LLM step fails.
+
+const TOP_N_FOR_PROMPT=8;
+
+function summarize(candidates:Candidate[]):string{
+ return candidates.slice(0,TOP_N_FOR_PROMPT).map((c,i)=>`${i+1}. [${c.kind}] "${c.text.slice(0,80)}"${c.url?` -> ${c.url}`:""}`).join("\n")||"(none detected)";
+}
 
 export async function resolve(stagehand:any,page:any,instruction:string,maxSteps=8){
  const history:any[]=[];
@@ -20,33 +26,31 @@ export async function resolve(stagehand:any,page:any,instruction:string,maxSteps
   if(direct?.url){history.push({url,action:direct});return{ok:true,url:direct.url,history};}
 
   let acted=false;
+  try{
+   const prompt=`Goal: find "${instruction}" on this site.
+Candidate links/buttons already detected on this page (may be incomplete or approximate):
+${summarize(candidates)}
 
-  if(i===0&&!acted){
-   try{
-    const searchObs=await stagehand.observe(`Find this site's search icon, search box, or search button, if one exists (not a generic navigation link).`,{page,timeout:60000});
-    const searchTrigger=searchObs?.data?.[0];
-    if(searchTrigger?.selector){
-     history.push({url,action:{kind:"search-open",text:searchTrigger.description,selector:searchTrigger.selector}});
-     await stagehand.act(searchTrigger,{page,timeout:60000});
-     await page.waitForTimeout(500);
-     await stagehand.act(`Type "${instruction}" into the search input field and press Enter to submit the search.`,{page,timeout:60000});
-     await page.waitForTimeout(1500);
-     acted=true;
+Pick the single best next action:
+- If one of the candidates above (or another visible link) leads directly to the exact file, choose it.
+- If a search box is visible and would likely be faster or more reliable than browsing, choose that instead.
+- Otherwise choose the most specific/relevant navigation (category, date, article) over generic or unrelated links.
+Avoid choosing something that would leave the page unchanged.`;
+   const obs=await stagehand.observe(prompt,{page,timeout:60000});
+   const next=obs?.data?.[0];
+   if(next?.selector){
+    history.push({url,action:{kind:"observe",text:next.description,selector:next.selector}});
+    await stagehand.act(next,{page,timeout:60000});
+    if(/search/i.test(next.description)){
+     try{
+      await page.waitForTimeout(300);
+      await stagehand.act(`Type "${instruction}" into the search input field and press Enter to submit the search.`,{page,timeout:60000});
+      await page.waitForTimeout(1000);
+     }catch{}
     }
-   }catch(e){console.error("search step failed:",e instanceof Error?e.message:String(e));}
-  }
-
-  if(!acted){
-   try{
-    const obs=await stagehand.observe(`Find the single best link, menu item, or button on this page to click next that moves closer to finding: ${instruction}. If a direct download link, attachment, or PDF for exactly this item is visible, prefer that. Otherwise prefer more specific/relevant navigation over generic links. Avoid links that stay on the current page.`,{page,timeout:60000});
-    const next=obs?.data?.[0];
-    if(next?.selector){
-     history.push({url,action:{kind:"observe",text:next.description,selector:next.selector}});
-     await stagehand.act(next,{page,timeout:60000});
-     acted=true;
-    }
-   }catch(e){console.error("observe step failed:",e instanceof Error?e.message:String(e));}
-  }
+    acted=true;
+   }
+  }catch(e){console.error("observe step failed:",e instanceof Error?e.message:String(e));}
 
   if(!acted){
    const action=candidates.find(x=>x.kind==="button"||x.kind==="link");
