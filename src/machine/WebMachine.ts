@@ -16,5 +16,8 @@ export class WebMachine{
   try{const file=await download(found.url);const verification=await verify(file.path);return{ok:verification.ok,url:file.url,path:file.path,verification,history:found.history};}
   catch(e){return{ok:false,url:found.url,message:e instanceof Error?e.message:String(e),history:found.history};}
  }
- async close(){await this.stagehand.close();}
+ async close(){
+  try{await this.stagehand.close();}
+  catch{try{await this.stagehand.browser?.close();}catch{}}
+ }
 }
