@@ -4,7 +4,6 @@
   "private":true,
   "type":"module",
   "scripts":{
-    "pretest":"pkill -f chrome-linux64/chrome || true",
     "test":"tsx src/test-horaeng.ts",
     "typecheck":"tsc --noEmit",
     "install-browser":"playwright install chromium"
