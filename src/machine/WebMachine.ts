@@ -5,6 +5,13 @@ export class WebMachine{
  async open(url:string){
   const pages=await this.stagehand.browser.context.pages();
   this.page=pages[0];
+  try{
+   await this.stagehand.browser.context.setDomainPolicy({blockedDomains:[
+    "googlesyndication.com","doubleclick.net","google-analytics.com","googletagmanager.com",
+    "adtrafficquality.google","fundingchoicesmessages.google.com","googleadservices.com",
+    "amazon-adsystem.com","facebook.net","connect.facebook.net"
+   ]});
+  }catch{}
   try{await this.page.goto(url,{waitUntil:"domcontentloaded",timeout:30000});}
   catch(e){await this.page.goto(url,{waitUntil:"domcontentloaded",timeout:30000});}
  }
