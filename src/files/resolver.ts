@@ -60,7 +60,6 @@ export async function resolve(stagehand:any,page:any,instruction:string,maxSteps
  const act=(target:any)=>stagehand.act(target,{page,timeout:CALL_TIMEOUT}).then(()=>true,()=>false);
 
  for(let i=0;i<maxSteps;i++){
-  page=await syncActivePage(stagehand,page);
   const url=await page.url().catch(()=>lastUrl||"");
   if(url===lastUrl){if(++stuckStreak>=MAX_STUCK)break;}else stuckStreak=0;
   lastUrl=url;
