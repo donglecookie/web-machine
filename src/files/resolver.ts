@@ -7,15 +7,17 @@ import {inspect,Candidate} from "../discovery/dom.js";
 // 3. Mechanical fallback: click the top-scoring unclicked candidate if the LLM step fails.
 
 const CALL_TIMEOUT=60000;
-const TOP_N_FOR_PROMPT=8;
+const TOP_N_NAV=4;
+const TOP_N_CONTENT=6;
 const MAX_STUCK=3;
 const FILE_RE=/\.pdf(?:$|[?#])/i;
 const KEYWORD_RE=/download|attachment|첨부|다운로드|pdf/i;
 
 function summarize(candidates:Candidate[]):string{
- return candidates.slice(0,TOP_N_FOR_PROMPT)
-  .map((c,i)=>`${i+1}. [${c.kind}] "${c.text.slice(0,80)}"${c.url?` -> ${c.url}`:""}`)
-  .join("\n")||"(none detected)";
+ const nav=candidates.filter(c=>c.nav).slice(0,TOP_N_NAV);
+ const content=candidates.filter(c=>!c.nav).slice(0,TOP_N_CONTENT);
+ const picked=[...nav,...content].filter((c,i,arr)=>arr.findIndex(x=>x.text===c.text&&x.url===c.url)===i);
+ return picked.map((c,i)=>`${i+1}. [${c.kind}${c.nav?"/nav":""}] "${c.text.slice(0,80)}"${c.url?` -> ${c.url}`:""}`).join("\n")||"(none detected)";
 }
 
 export async function resolve(stagehand:any,page:any,instruction:string,maxSteps=8){
