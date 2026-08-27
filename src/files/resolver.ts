@@ -1,10 +1,13 @@
 import {inspect,Candidate} from "../discovery/dom.js";
+import {readdir} from "node:fs/promises";
 
 // Strategy order (most general/common first, most site-specific last):
-// 1. Direct match already visible on the page (PDF link / download / attachment) - zero LLM calls
+// 1. Direct match already visible on the page (PDF link / same-site download) - zero LLM calls
 // 2. One grounded LLM decision per step: given the ranked DOM candidates, either click one,
 //    use the site's search feature (if visible), or navigate somewhere more specific.
 // 3. Mechanical fallback: click the top-scoring unclicked candidate if the LLM step fails.
+// After any click, also check whether it triggered a native browser download (common for
+// JS-driven "download" buttons that never expose a plain href).
 
 const CALL_TIMEOUT=60000;
 const TOP_N_NAV=4;
@@ -12,12 +15,29 @@ const TOP_N_CONTENT=6;
 const MAX_STUCK=3;
 const FILE_RE=/\.pdf(?:$|[?#])/i;
 const KEYWORD_RE=/download|attachment|첨부|다운로드|pdf/i;
+const DOWNLOADS_DIR="downloads";
 
 function summarize(candidates:Candidate[]):string{
  const nav=candidates.filter(c=>c.nav).slice(0,TOP_N_NAV);
  const content=candidates.filter(c=>!c.nav).slice(0,TOP_N_CONTENT);
  const picked=[...nav,...content].filter((c,i,arr)=>arr.findIndex(x=>x.text===c.text&&x.url===c.url)===i);
  return picked.map((c,i)=>`${i+1}. [${c.kind}${c.nav?"/nav":""}] "${c.text.slice(0,80)}"${c.url?` -> ${c.url}`:""}`).join("\n")||"(none detected)";
+}
+
+function sameHost(a:string,b:string):boolean{
+ try{return new URL(a).hostname===new URL(b).hostname;}catch{return false;}
+}
+
+async function snapshotDownloads():Promise<Set<string>>{
+ try{return new Set(await readdir(DOWNLOADS_DIR));}catch{return new Set();}
+}
+
+async function newDownloadedFile(before:Set<string>):Promise<string|null>{
+ try{
+  const after=await readdir(DOWNLOADS_DIR);
+  const added=after.find(f=>!before.has(f)&&!f.endsWith(".crdownload")&&!f.endsWith(".tmp"));
+  return added?`${DOWNLOADS_DIR}/${added}`:null;
+ }catch{return null;}
 }
 
 export async function resolve(stagehand:any,page:any,instruction:string,maxSteps=8){
@@ -32,9 +52,11 @@ export async function resolve(stagehand:any,page:any,instruction:string,maxSteps
   if(FILE_RE.test(url))return{ok:true,url,history};
 
   const candidates=await inspect(page);
-  const direct=candidates.find(c=>c.url&&FILE_RE.test(c.url))||candidates.find(c=>c.url&&KEYWORD_RE.test(`${c.text} ${c.url}`));
+  const direct=candidates.find(c=>c.url&&FILE_RE.test(c.url))
+   ||candidates.find(c=>c.url&&sameHost(c.url,url)&&KEYWORD_RE.test(`${c.text} ${c.url}`));
   if(direct?.url){history.push({url,action:direct});return{ok:true,url:direct.url,history};}
 
+  const beforeFiles=await snapshotDownloads();
   let acted=false;
   try{
    const obs=await stagehand.observe(`Goal: find "${instruction}" on this site.
@@ -68,6 +90,13 @@ Avoid choosing something that would leave the page unchanged.`,{page,timeout:CAL
     ?await page.goto(action.url,{waitUntil:"domcontentloaded",timeout:CALL_TIMEOUT}).then(()=>true,()=>false)
     :false;
    if(!ok)break;
+   acted=true;
+  }
+
+  if(acted){
+   await page.waitForTimeout(1200);
+   const downloadedFile=await newDownloadedFile(beforeFiles);
+   if(downloadedFile)return{ok:true,downloadedFile,history};
   }
 
   await page.waitForTimeout(500);
