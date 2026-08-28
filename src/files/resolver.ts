@@ -25,6 +25,15 @@ function summarize(candidates:Candidate[]):string{
  return picked.map((c,i)=>`${i+1}. [${c.kind}${c.nav?"/nav":""}] "${c.text.slice(0,80)}"${c.url?` -> ${c.url}`:""}`).join("\n")||"(none detected)";
 }
 
+// Short-term memory of what this same resolve() run has already tried, so multi-step flows
+// (e.g. selecting several filters before a search button becomes meaningful) aren't repeated
+// or forgotten between steps - each LLM call otherwise reasons from a blank slate.
+function recap(history:any[]):string{
+ const recent=history.slice(-4);
+ if(!recent.length)return"(nothing yet - this is the first step)";
+ return recent.map((h,i)=>`${i+1}. clicked "${h.action?.text||h.action?.description||"?"}"`).join("\n");
+}
+
 function sameHost(a:string,b:string):boolean{
  try{return new URL(a).hostname===new URL(b).hostname;}catch{return false;}
 }
@@ -81,14 +90,19 @@ export async function resolve(stagehand:any,page:any,instruction:string,maxSteps
   let acted=false;
   try{
    const obs=await stagehand.observe(`Goal: find "${instruction}" on this site.
+
+Actions already taken so far on this site (most recent last) - do not repeat these, and if they look like partial progress through a multi-step filter/selection flow, continue that flow (e.g. if a grade/level was already selected, select the matching date/subject next, then submit):
+${recap(history)}
+
 Candidate links/buttons already detected on this page (may be incomplete or approximate):
 ${summarize(candidates)}
 
 Pick the single best next action:
 - If one of the candidates above (or another visible link) leads directly to the exact file, choose it.
+- If this page has a multi-step filter/search UI (e.g. pick a category, then a date, then submit) and some filters are already selected per the actions above, pick the next unset filter or the submit/search button.
 - If a search box is visible and would likely be faster or more reliable than browsing, choose that instead.
 - Otherwise choose the most specific/relevant navigation (category, date, article) over generic or unrelated links.
-Avoid choosing something that would leave the page unchanged.`,{page,timeout:CALL_TIMEOUT});
+Avoid choosing something that would leave the page unchanged or repeat an action already taken.`,{page,timeout:CALL_TIMEOUT});
    const next=obs?.data?.[0];
    if(next?.selector&&await act(next)){
     history.push({url,action:{kind:"observe",text:next.description,selector:next.selector}});
