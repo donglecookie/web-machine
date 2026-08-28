@@ -16,7 +16,7 @@ try{
   await machine.open(target);
   console.log("PAGE:",await machine.page.url());
   console.log("TITLE:",await machine.page.title());
-  report(await machine.fetch(query,10));
+  report(await machine.fetch(query,16));
  }else{
   console.log("QUERY:",query);
   console.log("No TEST_URL given — searching the web for a starting site...");

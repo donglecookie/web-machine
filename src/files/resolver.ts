@@ -28,7 +28,7 @@ function summarize(candidates:Candidate[]):string{
 // (e.g. selecting several filters before a search button becomes meaningful) aren't repeated
 // or forgotten between steps - each LLM call otherwise reasons from a blank slate.
 function recap(history:any[]):string{
- const recent=history.slice(-4);
+ const recent=history.slice(-8);
  if(!recent.length)return"(nothing yet - this is the first step)";
  return recent.map((h,i)=>`${i+1}. clicked "${h.action?.text||h.action?.description||"?"}"`).join("\n");
 }
@@ -97,6 +97,7 @@ ${summarize(candidates)}
 Pick the single best next action:
 - If one of the candidates above (or another visible link) leads directly to the exact file, choose it.
 - If this page has a multi-step filter/search UI (e.g. pick a category, then a date, then submit) and some filters are already selected per the actions above, pick the next unset filter or the submit/search button.
+- Do not click a submit/search button that already appears in the actions-taken list above - if you already clicked it and results still haven't appeared, look for an actual result/exam link instead, or a different next step.
 - If a search box is visible and would likely be faster or more reliable than browsing, choose that instead.
 - Otherwise choose the most specific/relevant navigation (category, date, article) over generic or unrelated links.
 Avoid choosing something that would leave the page unchanged or repeat an action already taken.`,{page,timeout:CALL_TIMEOUT});
