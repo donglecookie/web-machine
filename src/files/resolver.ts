@@ -67,7 +67,18 @@ async function syncActivePage(stagehand:any,current:any):Promise<any>{
 
 export async function resolve(stagehand:any,page:any,instruction:string,maxSteps=8){
  const history:any[]=[];
+ // observe() already grounds a concrete selector, so execute it directly via the
+ // Playwright-style Locator API (no LLM call) instead of re-asking the model what to do.
+ // Only fall back to the LLM-driven act() (which re-reasons and self-heals) if the direct
+ // click fails - e.g. the page changed shape between observing and clicking. Bounded to a
+ // short timeout so a missing/stale selector fails fast into the fallback rather than
+ // waiting out the locator's own default actionability timeout first.
+ const clickFast=(selector:string)=>Promise.race([
+  page.locator(selector).click().then(()=>true),
+  new Promise<boolean>(res=>setTimeout(()=>res(false),8000))
+ ]).catch(()=>false);
  const act=(target:any)=>stagehand.act(target,{page,timeout:CALL_TIMEOUT}).then(()=>true,()=>false);
+ const click=async(selector:string,fallbackInstruction:string)=>await clickFast(selector)||await act(fallbackInstruction);
 
  for(let i=0;i<maxSteps;i++){
   const url=await page.url().catch(()=>history[history.length-1]?.url||"");
@@ -99,7 +110,7 @@ Next action:
 Never repeat a prior action or pick something that leaves the page unchanged.
 Never pick actions that log out, delete, purchase, subscribe, or otherwise make an irreversible/account-affecting change - only read/navigate/search actions.`,{page,timeout:CALL_TIMEOUT});
    const next=obs?.data?.[0];
-   if(next?.selector&&await act(next)){
+   if(next?.selector&&await click(next.selector,`Click "${next.description}".`)){
     selector=next.selector;
     history.push({url,action:{kind:"observe",text:next.description,selector:next.selector}});
     if(/search|검색/i.test(next.description)){
@@ -117,7 +128,7 @@ Never pick actions that log out, delete, purchase, subscribe, or otherwise make 
    selector=action.selector;
    history.push({url,action});
    const ok=action.selector
-    ?await act(`Click the element with selector ${action.selector}.`)
+    ?await click(action.selector,`Click the element with selector ${action.selector}.`)
     :action.url
     ?await page.goto(action.url,{waitUntil:"domcontentloaded",timeout:CALL_TIMEOUT}).then(()=>true,()=>false)
     :false;

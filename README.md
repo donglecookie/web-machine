@@ -62,7 +62,3 @@ npm install
 npm run install-browser
 TEST_URL=https://example.com npm run test -- "찾고 싶은 파일이나 자료 설명"
 ```
-
-## License
-
-[MIT](LICENSE)

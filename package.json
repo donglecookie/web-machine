@@ -1,11 +1,8 @@
 {
   "name":"web-machine-v9",
-  "version":"1.0.0",
-  "description":"Site-agnostic web navigation and file-fetching engine: given a query and either a starting site or nothing at all, it searches, navigates, and downloads the target file (typically PDFs) without hardcoding any site's structure.",
+  "version":"0.9.0",
   "private":true,
   "type":"module",
-  "license":"MIT",
-  "repository":{"type":"git","url":"https://github.com/donglecookie/web-machine"},
   "scripts":{
     "test":"tsx src/test.ts",
     "typecheck":"tsc --noEmit",
