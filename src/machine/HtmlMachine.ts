@@ -77,7 +77,6 @@ export class HtmlMachine{
    const html=await this.fetchHtml(url);
    if(!html)break;
    const links=this.extractLinks(html,url);
-   console.error(`HtmlMachine: ${url} -> ${html.length} bytes, ${links.length} links`);
 
    const direct=links.find(l=>FILE_RE.test(l.url))
     ||links.find(l=>sameHost(l.url,url)&&KEYWORD_RE.test(l.text));
