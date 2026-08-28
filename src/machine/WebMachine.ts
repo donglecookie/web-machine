@@ -28,7 +28,7 @@ export class WebMachine{
  async fetch(instruction:string,maxSteps=8){
   // Fast path: check the raw HTML of the current page for an obvious direct file link
   // before spinning up the full browser-driven resolve() loop.
-  const currentUrl=await this.page?.url().catch(()=>null);
+  const currentUrl=this.page?await this.page.url().catch(()=>null):null;
   if(currentUrl&&currentUrl!=="about:blank"){
    const direct=await this.html.findDirectFile(currentUrl).catch(()=>null);
    if(direct)return this.downloadAndVerify(direct,[{url:currentUrl,action:{kind:"html-direct",url:direct}}]);

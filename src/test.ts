@@ -4,14 +4,19 @@ function report(result:any){
  if(result.ok)console.log(`\nSUCCESS: ${result.path}`);
  else process.exitCode=1;
 }
-const stagehand=await createStagehand();const machine=new WebMachine(stagehand);
+
+const query=process.argv.slice(2).join(" ");
+if(!query){
+ console.error("Usage: npm run test -- <what to find>\n  (optionally set TEST_URL=<url> to skip web search and start on a specific site)");
+ process.exit(1);
+}
+
+let machine:WebMachine|undefined;
 try{
+ const stagehand=await createStagehand();
+ machine=new WebMachine(stagehand);
  const target=process.env.TEST_URL;
- const query=process.argv.slice(2).join(" ");
- if(!query){
-  console.error("Usage: npm run test -- <what to find>\n  (optionally set TEST_URL=<url> to skip web search and start on a specific site)");
-  process.exitCode=1;
- }else if(target){
+ if(target){
   console.log("TARGET:",target);console.log("QUERY:",query);
   await machine.open(target);
   console.log("PAGE:",await machine.page.url());
@@ -26,4 +31,6 @@ try{
 }catch(e){
  console.error("FAILED:",e instanceof Error?e.stack||e.message:e);
  process.exitCode=1;
-}finally{await machine.close();}
+}finally{
+ if(machine)await machine.close();
+}
