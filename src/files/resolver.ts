@@ -102,7 +102,7 @@ Never pick actions that log out, delete, purchase, subscribe, or otherwise make 
    if(next?.selector&&await act(next)){
     selector=next.selector;
     history.push({url,action:{kind:"observe",text:next.description,selector:next.selector}});
-    if(/search/i.test(next.description)){
+    if(/search|검색/i.test(next.description)){
      await page.waitForTimeout(300);
      await act(`Type "${instruction}" into the search input field and press Enter to submit the search.`);
      await page.waitForTimeout(1000);

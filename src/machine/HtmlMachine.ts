@@ -9,19 +9,8 @@ const DEFAULT_HEADERS={
  "Accept-Language":"en-US,en;q=0.9"
 };
 const LINK_RE=/<a\s+[^>]*href="([^"]+)"[^>]*>(.*?)<\/a>/gis;
-const MAX_STEPS_DEFAULT=6;
 
 export type HtmlLink={url:string;text:string};
-
-// Crude relevance heuristic for choosing which link to follow next, with no LLM involved:
-// how many distinctive words from the instruction appear in the link's own text.
-function tokenize(s:string):string[]{
- return s.toLowerCase().split(/[\s,·\-–—/|]+/).map(t=>t.trim()).filter(t=>t.length>=2);
-}
-function overlapScore(text:string,tokens:string[]):number{
- const t=text.toLowerCase();
- return tokens.reduce((n,tok)=>n+(t.includes(tok)?1:0),0);
-}
 
 export class HtmlMachine{
  async fetchHtml(url:string):Promise<string|null>{
@@ -52,40 +41,5 @@ export class HtmlMachine{
   const direct=links.find(l=>FILE_RE.test(l.url))
    ||links.find(l=>sameHost(l.url,url)&&KEYWORD_RE.test(l.text));
   return direct?.url||null;
- }
-
- // Multi-hop version: follow same-site links purely via HTTP, no browser/LLM, scoring each
- // page's candidate links by word overlap with the instruction. Good for static/server-rendered
- // sites; sites that need real interaction (JS, clicks, forms) won't be reachable this way and
- // should fall back to WebMachine instead.
- async resolve(startUrl:string,instruction:string,maxSteps=MAX_STEPS_DEFAULT){
-  const history:any[]=[];
-  const tokens=tokenize(instruction);
-  const seen=new Set<string>();
-  let url=startUrl;
-
-  for(let i=0;i<maxSteps;i++){
-   if(seen.has(url))break;
-   seen.add(url);
-   if(FILE_RE.test(url))return{ok:true,url,history};
-
-   const html=await this.fetchHtml(url);
-   if(!html)break;
-   const links=this.extractLinks(html,url);
-
-   const direct=links.find(l=>FILE_RE.test(l.url))
-    ||links.find(l=>sameHost(l.url,url)&&KEYWORD_RE.test(l.text));
-   if(direct){history.push({url,action:direct});return{ok:true,url:direct.url,history};}
-
-   const next=links
-    .filter(l=>!seen.has(l.url)&&sameHost(l.url,startUrl))
-    .map(l=>({...l,score:overlapScore(l.text,tokens)}))
-    .filter(l=>l.score>0)
-    .sort((a,b)=>b.score-a.score)[0];
-   if(!next)break;
-   history.push({url,action:next});
-   url=next.url;
-  }
-  return{ok:false,history};
  }
 }
