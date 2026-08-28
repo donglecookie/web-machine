@@ -19,8 +19,14 @@ function sameHost(a:string,b:string):boolean{
 
 export class HtmlMachine{
  async fetchHtml(url:string):Promise<string|null>{
-  const res=await fetch(url,{headers:DEFAULT_HEADERS}).catch(()=>null);
-  return res&&res.ok?res.text():null;
+  try{
+   const res=await fetch(url,{headers:DEFAULT_HEADERS});
+   if(!res.ok){console.error(`HtmlMachine: fetch ${url} -> HTTP ${res.status}`);return null;}
+   return await res.text();
+  }catch(e){
+   console.error(`HtmlMachine: fetch ${url} threw:`,e instanceof Error?e.message:String(e));
+   return null;
+  }
  }
 
  extractLinks(html:string,baseUrl:string):HtmlLink[]{

@@ -44,17 +44,19 @@ function unwrapGoogleRedirect(href:string):string{
 // Primary strategy: use HtmlMachine to fetch a search engine's server-rendered HTML directly
 // (no browser, no LLM) and pull organic result links from it. Fast and free; works because
 // these results are present in the raw HTML response, not injected by client-side JS.
-async function htmlSearch(url:string,unwrap:(u:string)=>string,noise:(u:string)=>boolean):Promise<SearchResult[]>{
+async function htmlSearch(engine:string,url:string,unwrap:(u:string)=>string,noise:(u:string)=>boolean):Promise<SearchResult[]>{
  const page=await html.fetchHtml(url);
  if(!page)return[];
  const seen=new Set<string>();
  const out:SearchResult[]=[];
- for(const link of html.extractLinks(page,url)){
+ const allLinks=html.extractLinks(page,url);
+ for(const link of allLinks){
   const u=unwrap(link.url);
   if(!u||!/^https?:\/\//.test(u)||noise(u)||seen.has(u)||!link.text)continue;
   seen.add(u);out.push({title:link.text,url:u});
   if(out.length>=8)break;
  }
+ if(!out.length)console.error(`search: ${engine} HTML had ${allLinks.length} raw <a> tags but none matched (page length ${page.length})`);
  return out;
 }
 
@@ -81,10 +83,10 @@ async function browserSearch(page:any,stagehand:any,query:string):Promise<Search
 }
 
 export async function searchWeb(page:any,stagehand:any,query:string):Promise<SearchResult[]>{
- const bing=await htmlSearch(`https://www.bing.com/search?q=${encodeURIComponent(query)}`,unwrapBingRedirect,isNoise);
+ const bing=await htmlSearch("Bing",`https://www.bing.com/search?q=${encodeURIComponent(query)}`,unwrapBingRedirect,isNoise);
  if(bing.length)return bing;
 
- const google=await htmlSearch(`https://www.google.com/search?q=${encodeURIComponent(query)}&num=10`,unwrapGoogleRedirect,isGoogleNoise);
+ const google=await htmlSearch("Google",`https://www.google.com/search?q=${encodeURIComponent(query)}&num=10`,unwrapGoogleRedirect,isGoogleNoise);
  if(google.length)return google;
 
  console.error("search: plain HTML fetch (Bing, Google) returned no results, falling back to browser+LLM extraction");
