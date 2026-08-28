@@ -16,7 +16,7 @@ const EVAL_SOURCE=`(() => {
 const MAX_CANDIDATES=30;
 export async function inspect(page:any):Promise<Candidate[]>{
  const xs=await page.evaluate(EVAL_SOURCE);
- const scored=xs.map((x:any)=>{const s=`${x.text} ${x.url||""}`.toLowerCase();let score=0;if(/pdf|첨부|다운로드|download|문제|사회문화|사회·문화|파일|attachment/.test(s))score+=60;if(x.kind==="download")score+=40;if(/\.pdf(?:$|[?#])/i.test(x.url||""))score+=100;return{...x,score};});
+ const scored=xs.map((x:any)=>{const s=x.text.toLowerCase();let score=0;if(/pdf|첨부|다운로드|download|문제|사회문화|사회·문화|파일|attachment/.test(s))score+=60;if(x.kind==="download")score+=40;if(/\.pdf(?:$|[?#])/i.test(x.url||""))score+=100;return{...x,score};});
  const seen=new Set<string>();
  const deduped=scored.filter((c:any)=>{const key=`${c.kind}|${c.text}|${c.url||""}`;if(seen.has(key))return false;seen.add(key);return true;});
  return deduped.sort((a:any,b:any)=>b.score-a.score).slice(0,MAX_CANDIDATES);

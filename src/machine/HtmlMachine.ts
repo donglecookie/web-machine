@@ -44,7 +44,7 @@ export class HtmlMachine{
   if(!html)return null;
   const links=this.extractLinks(html,url);
   const direct=links.find(l=>FILE_RE.test(l.url))
-   ||links.find(l=>sameHost(l.url,url)&&KEYWORD_RE.test(`${l.text} ${l.url}`));
+   ||links.find(l=>sameHost(l.url,url)&&KEYWORD_RE.test(l.text));
   return direct?.url||null;
  }
 }

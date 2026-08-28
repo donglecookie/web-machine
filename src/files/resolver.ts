@@ -29,6 +29,13 @@ function sameHost(a:string,b:string):boolean{
  try{return new URL(a).hostname===new URL(b).hostname;}catch{return false;}
 }
 
+function isSamePageHash(candidateUrl:string,currentUrl:string):boolean{
+ try{
+  const c=new URL(candidateUrl),u=new URL(currentUrl);
+  return c.origin===u.origin&&c.pathname===u.pathname&&c.search===u.search&&c.hash!=="";
+ }catch{return false;}
+}
+
 async function snapshotDownloads():Promise<Set<string>>{
  try{return new Set(await readdir(DOWNLOADS_DIR));}catch{return new Set();}
 }
@@ -67,7 +74,7 @@ export async function resolve(stagehand:any,page:any,instruction:string,maxSteps
 
   const candidates=await inspect(page).catch(()=>[]);
   const direct=candidates.find(c=>c.url&&FILE_RE.test(c.url))
-   ||candidates.find(c=>c.url&&sameHost(c.url,url)&&KEYWORD_RE.test(`${c.text} ${c.url}`));
+   ||candidates.find(c=>c.url&&sameHost(c.url,url)&&!isSamePageHash(c.url,url)&&KEYWORD_RE.test(c.text));
   if(direct?.url){history.push({url,action:direct});return{ok:true,url:direct.url,history};}
 
   const beforeFiles=await snapshotDownloads();
