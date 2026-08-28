@@ -1,9 +1,11 @@
 import {z} from "zod";
+import {HtmlMachine} from "../machine/HtmlMachine.js";
 export type SearchResult={title:string;url:string};
 
 const RESULTS_SCHEMA=z.object({
  results:z.array(z.object({title:z.string().nullable(),url:z.string().nullable()}))
 });
+const html=new HtmlMachine();
 
 // Bing wraps organic result links in a /ck/a?...&u=a1<base64url> click-tracking redirect;
 // unwrap it to get the real destination.
@@ -24,68 +26,41 @@ function isNoise(url:string):boolean{
  try{const h=new URL(url).hostname;return /(^|\.)bing\.com$/.test(h)||/(^|\.)microsoft\.com$/.test(h);}
  catch{return true;}
 }
-
-function decodeEntities(s:string):string{
- return s.replace(/&amp;/g,"&").replace(/&quot;/g,'"').replace(/&#39;/g,"'").replace(/&lt;/g,"<").replace(/&gt;/g,">");
-}
-
-const HTML_RESULT_RE=/<h2>\s*<a\s+href="([^"]+)"[^>]*>(.*?)<\/a>\s*<\/h2>/gis;
-const GOOGLE_RESULT_RE=/<a[^>]+href="\/url\?q=([^&"]+)[^"]*"[^>]*>(.*?)<\/a>/gis;
-
 function isGoogleNoise(url:string):boolean{
  try{const h=new URL(url).hostname;return /(^|\.)google\.[a-z.]+$/.test(h)||/(^|\.)gstatic\.com$/.test(h);}
  catch{return true;}
 }
-
-async function fetchHtml(url:string):Promise<string|null>{
- const res=await fetch(url,{
-  headers:{
-   "User-Agent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-   "Accept-Language":"en-US,en;q=0.9"
+function unwrapGoogleRedirect(href:string):string{
+ try{
+  const u=new URL(href);
+  if(/(^|\.)google\.[a-z.]+$/.test(u.hostname)&&u.pathname==="/url"){
+   const q=u.searchParams.get("q");
+   if(q&&/^https?:\/\//.test(q))return q;
   }
- }).catch(()=>null);
- return res&&res.ok?res.text():null;
+ }catch{}
+ return href;
 }
 
-// Primary strategy: fetch a search engine's server-rendered HTML directly (no browser, no
-// LLM) and regex-parse the organic result links. Fast and free; works because these results
-// are present in the raw HTML response, not injected by client-side JS. Tries Bing first,
-// then Google's no-JS result format, before falling back to a browser.
-async function fetchHtmlResults(query:string):Promise<SearchResult[]>{
- const bingHtml=await fetchHtml(`https://www.bing.com/search?q=${encodeURIComponent(query)}`);
- if(bingHtml){
-  const seen=new Set<string>();
-  const out:SearchResult[]=[];
-  for(const m of bingHtml.matchAll(HTML_RESULT_RE)){
-   const url=unwrapBingRedirect(m[1]);
-   const title=decodeEntities(m[2].replace(/<[^>]+>/g,"")).trim();
-   if(!url||!/^https?:\/\//.test(url)||isNoise(url)||seen.has(url))continue;
-   seen.add(url);out.push({title,url});
-   if(out.length>=8)break;
-  }
-  if(out.length)return out;
+// Primary strategy: use HtmlMachine to fetch a search engine's server-rendered HTML directly
+// (no browser, no LLM) and pull organic result links from it. Fast and free; works because
+// these results are present in the raw HTML response, not injected by client-side JS.
+async function htmlSearch(url:string,unwrap:(u:string)=>string,noise:(u:string)=>boolean):Promise<SearchResult[]>{
+ const page=await html.fetchHtml(url);
+ if(!page)return[];
+ const seen=new Set<string>();
+ const out:SearchResult[]=[];
+ for(const link of html.extractLinks(page,url)){
+  const u=unwrap(link.url);
+  if(!u||!/^https?:\/\//.test(u)||noise(u)||seen.has(u)||!link.text)continue;
+  seen.add(u);out.push({title:link.text,url:u});
+  if(out.length>=8)break;
  }
-
- const googleHtml=await fetchHtml(`https://www.google.com/search?q=${encodeURIComponent(query)}&num=10`);
- if(googleHtml){
-  const seen=new Set<string>();
-  const out:SearchResult[]=[];
-  for(const m of googleHtml.matchAll(GOOGLE_RESULT_RE)){
-   const url=decodeURIComponent(m[1]);
-   const title=decodeEntities(m[2].replace(/<[^>]+>/g,"")).trim();
-   if(!url||!/^https?:\/\//.test(url)||isGoogleNoise(url)||seen.has(url))continue;
-   seen.add(url);out.push({title,url});
-   if(out.length>=8)break;
-  }
-  if(out.length)return out;
- }
-
- return[];
+ return out;
 }
 
-// Fallback strategy: if the plain HTML fetch is blocked/changed, use the existing browser +
-// LLM to read the results page semantically instead of relying on brittle regex/selectors.
-async function extractResultsViaBrowser(page:any,stagehand:any,query:string):Promise<SearchResult[]>{
+// Fallback strategy: if the plain HTML fetch is blocked/changed, use the browser + LLM to
+// read the results page semantically instead of relying on brittle regex/selectors.
+async function browserSearch(page:any,stagehand:any,query:string):Promise<SearchResult[]>{
  await page.goto(`https://www.bing.com/search?q=${encodeURIComponent(query)}`,{waitUntil:"domcontentloaded",timeout:30000});
  await page.waitForSelector("#b_results",{timeout:10000}).catch(()=>{});
  let extracted:any=null;
@@ -106,10 +81,14 @@ async function extractResultsViaBrowser(page:any,stagehand:any,query:string):Pro
 }
 
 export async function searchWeb(page:any,stagehand:any,query:string):Promise<SearchResult[]>{
- const direct=await fetchHtmlResults(query);
- if(direct.length)return direct;
- console.error("search: plain HTML fetch returned no results, falling back to browser+LLM extraction");
- const results=await extractResultsViaBrowser(page,stagehand,query);
+ const bing=await htmlSearch(`https://www.bing.com/search?q=${encodeURIComponent(query)}`,unwrapBingRedirect,isNoise);
+ if(bing.length)return bing;
+
+ const google=await htmlSearch(`https://www.google.com/search?q=${encodeURIComponent(query)}&num=10`,unwrapGoogleRedirect,isGoogleNoise);
+ if(google.length)return google;
+
+ console.error("search: plain HTML fetch (Bing, Google) returned no results, falling back to browser+LLM extraction");
+ const results=await browserSearch(page,stagehand,query);
  if(!results.length){
   const title=await page.title().catch(()=>"?");
   console.error(`search: no usable results on "${title}" either`);
