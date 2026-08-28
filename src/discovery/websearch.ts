@@ -30,30 +30,57 @@ function decodeEntities(s:string):string{
 }
 
 const HTML_RESULT_RE=/<h2>\s*<a\s+href="([^"]+)"[^>]*>(.*?)<\/a>\s*<\/h2>/gis;
+const GOOGLE_RESULT_RE=/<a[^>]+href="\/url\?q=([^&"]+)[^"]*"[^>]*>(.*?)<\/a>/gis;
 
-// Primary strategy: fetch Bing's server-rendered HTML directly (no browser, no LLM) and
-// regex-parse the organic result links. Fast and free; works because these results are
-// present in the raw HTML response, not injected by client-side JS.
-async function fetchHtmlResults(query:string):Promise<SearchResult[]>{
- const res=await fetch(`https://www.bing.com/search?q=${encodeURIComponent(query)}`,{
+function isGoogleNoise(url:string):boolean{
+ try{const h=new URL(url).hostname;return /(^|\.)google\.[a-z.]+$/.test(h)||/(^|\.)gstatic\.com$/.test(h);}
+ catch{return true;}
+}
+
+async function fetchHtml(url:string):Promise<string|null>{
+ const res=await fetch(url,{
   headers:{
    "User-Agent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
    "Accept-Language":"en-US,en;q=0.9"
   }
  }).catch(()=>null);
- if(!res||!res.ok)return[];
- const html=await res.text();
- const seen=new Set<string>();
- const out:SearchResult[]=[];
- for(const m of html.matchAll(HTML_RESULT_RE)){
-  const url=unwrapBingRedirect(m[1]);
-  const title=decodeEntities(m[2].replace(/<[^>]+>/g,"")).trim();
-  if(!url||!/^https?:\/\//.test(url)||isNoise(url)||seen.has(url))continue;
-  seen.add(url);
-  out.push({title,url});
-  if(out.length>=8)break;
+ return res&&res.ok?res.text():null;
+}
+
+// Primary strategy: fetch a search engine's server-rendered HTML directly (no browser, no
+// LLM) and regex-parse the organic result links. Fast and free; works because these results
+// are present in the raw HTML response, not injected by client-side JS. Tries Bing first,
+// then Google's no-JS result format, before falling back to a browser.
+async function fetchHtmlResults(query:string):Promise<SearchResult[]>{
+ const bingHtml=await fetchHtml(`https://www.bing.com/search?q=${encodeURIComponent(query)}`);
+ if(bingHtml){
+  const seen=new Set<string>();
+  const out:SearchResult[]=[];
+  for(const m of bingHtml.matchAll(HTML_RESULT_RE)){
+   const url=unwrapBingRedirect(m[1]);
+   const title=decodeEntities(m[2].replace(/<[^>]+>/g,"")).trim();
+   if(!url||!/^https?:\/\//.test(url)||isNoise(url)||seen.has(url))continue;
+   seen.add(url);out.push({title,url});
+   if(out.length>=8)break;
+  }
+  if(out.length)return out;
  }
- return out;
+
+ const googleHtml=await fetchHtml(`https://www.google.com/search?q=${encodeURIComponent(query)}&num=10`);
+ if(googleHtml){
+  const seen=new Set<string>();
+  const out:SearchResult[]=[];
+  for(const m of googleHtml.matchAll(GOOGLE_RESULT_RE)){
+   const url=decodeURIComponent(m[1]);
+   const title=decodeEntities(m[2].replace(/<[^>]+>/g,"")).trim();
+   if(!url||!/^https?:\/\//.test(url)||isGoogleNoise(url)||seen.has(url))continue;
+   seen.add(url);out.push({title,url});
+   if(out.length>=8)break;
+  }
+  if(out.length)return out;
+ }
+
+ return[];
 }
 
 // Fallback strategy: if the plain HTML fetch is blocked/changed, use the existing browser +
