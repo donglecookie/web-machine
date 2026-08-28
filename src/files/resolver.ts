@@ -13,7 +13,6 @@ import {readdir} from "node:fs/promises";
 const CALL_TIMEOUT=60000;
 const TOP_N_NAV=4;
 const TOP_N_CONTENT=6;
-const MAX_STUCK=3;
 const FILE_RE=/\.pdf(?:$|[?#])/i;
 const KEYWORD_RE=/download|attachment|첨부|다운로드|pdf/i;
 const DOWNLOADS_DIR="downloads";
@@ -72,13 +71,10 @@ async function syncActivePage(stagehand:any,current:any):Promise<any>{
 
 export async function resolve(stagehand:any,page:any,instruction:string,maxSteps=8){
  const history:any[]=[];
- let lastUrl:string|null=null,stuckStreak=0;
  const act=(target:any)=>stagehand.act(target,{page,timeout:CALL_TIMEOUT}).then(()=>true,()=>false);
 
  for(let i=0;i<maxSteps;i++){
-  const url=await page.url().catch(()=>lastUrl||"");
-  if(url===lastUrl){if(++stuckStreak>=MAX_STUCK)break;}else stuckStreak=0;
-  lastUrl=url;
+  const url=await page.url().catch(()=>history[history.length-1]?.url||"");
   if(FILE_RE.test(url))return{ok:true,url,history};
 
   const candidates=await inspect(page).catch(()=>[]);
@@ -88,6 +84,7 @@ export async function resolve(stagehand:any,page:any,instruction:string,maxSteps
 
   const beforeFiles=await snapshotDownloads();
   let acted=false;
+  let selector:string|undefined;
   try{
    const obs=await stagehand.observe(`Goal: find "${instruction}" on this site.
 
@@ -105,6 +102,7 @@ Pick the single best next action:
 Avoid choosing something that would leave the page unchanged or repeat an action already taken.`,{page,timeout:CALL_TIMEOUT});
    const next=obs?.data?.[0];
    if(next?.selector&&await act(next)){
+    selector=next.selector;
     history.push({url,action:{kind:"observe",text:next.description,selector:next.selector}});
     if(/search/i.test(next.description)){
      await page.waitForTimeout(300);
@@ -118,6 +116,7 @@ Avoid choosing something that would leave the page unchanged or repeat an action
   if(!acted){
    const action=candidates.find(c=>c.kind==="button"||c.kind==="link");
    if(!action)break;
+   selector=action.selector;
    history.push({url,action});
    const ok=action.selector
     ?await act(`Click the element with selector ${action.selector}.`)
@@ -127,6 +126,12 @@ Avoid choosing something that would leave the page unchanged or repeat an action
    if(!ok)break;
    acted=true;
   }
+
+  // Genuine stuck-loop detection: the exact same element chosen twice in a row, despite being
+  // told not to. (URL staying the same is NOT itself a sign of being stuck - many sites drive
+  // multi-step filter flows entirely through client-side state on one URL.)
+  const prev=history[history.length-2]?.action?.selector;
+  if(selector&&selector===prev)break;
 
   if(acted){
    await page.waitForTimeout(1200);
