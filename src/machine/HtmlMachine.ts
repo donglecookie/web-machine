@@ -3,20 +3,15 @@
 // before falling back to the full browser-driven WebMachine for pages that need real
 // interaction (clicks, JS-rendered content, native downloads).
 
+import {FILE_RE,KEYWORD_RE,sameHost} from "../discovery/patterns.js";
 const DEFAULT_HEADERS={
  "User-Agent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
  "Accept-Language":"en-US,en;q=0.9"
 };
-const FILE_RE=/\.pdf(?:$|[?#])/i;
-const KEYWORD_RE=/download|attachment|첨부|다운로드|pdf/i;
 const LINK_RE=/<a\s+[^>]*href="([^"]+)"[^>]*>(.*?)<\/a>/gis;
 const MAX_STEPS_DEFAULT=6;
 
 export type HtmlLink={url:string;text:string};
-
-function sameHost(a:string,b:string):boolean{
- try{return new URL(a).hostname===new URL(b).hostname;}catch{return false;}
-}
 
 // Crude relevance heuristic for choosing which link to follow next, with no LLM involved:
 // how many distinctive words from the instruction appear in the link's own text.

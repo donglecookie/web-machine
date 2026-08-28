@@ -1,4 +1,5 @@
 import {inspect,Candidate} from "../discovery/dom.js";
+import {FILE_RE,KEYWORD_RE,sameHost} from "../discovery/patterns.js";
 import {readdir} from "node:fs/promises";
 
 // Strategy order (most general/common first, most site-specific last):
@@ -13,28 +14,23 @@ import {readdir} from "node:fs/promises";
 const CALL_TIMEOUT=60000;
 const TOP_N_NAV=4;
 const TOP_N_CONTENT=6;
-const FILE_RE=/\.pdf(?:$|[?#])/i;
-const KEYWORD_RE=/download|attachment|첨부|다운로드|pdf/i;
+const RECAP_STEPS=8;
 const DOWNLOADS_DIR="downloads";
 
 function summarize(candidates:Candidate[]):string{
  const nav=candidates.filter(c=>c.nav).slice(0,TOP_N_NAV);
  const content=candidates.filter(c=>!c.nav).slice(0,TOP_N_CONTENT);
  const picked=[...nav,...content].filter((c,i,arr)=>arr.findIndex(x=>x.text===c.text&&x.url===c.url)===i);
- return picked.map((c,i)=>`${i+1}. [${c.kind}${c.nav?"/nav":""}] "${c.text.slice(0,80)}"${c.url?` -> ${c.url}`:""}`).join("\n")||"(none detected)";
+ return picked.map((c,i)=>`${i+1}. [${c.kind}${c.nav?"/nav":""}] "${c.text.slice(0,80)}"${c.url?` -> ${c.url}`:""}`).join("\n")||"(none)";
 }
 
 // Short-term memory of what this same resolve() run has already tried, so multi-step flows
 // (e.g. selecting several filters before a search button becomes meaningful) aren't repeated
 // or forgotten between steps - each LLM call otherwise reasons from a blank slate.
 function recap(history:any[]):string{
- const recent=history.slice(-8);
- if(!recent.length)return"(nothing yet - this is the first step)";
- return recent.map((h,i)=>`${i+1}. clicked "${h.action?.text||h.action?.description||"?"}"`).join("\n");
-}
-
-function sameHost(a:string,b:string):boolean{
- try{return new URL(a).hostname===new URL(b).hostname;}catch{return false;}
+ const recent=history.slice(-RECAP_STEPS);
+ if(!recent.length)return"(none - first step)";
+ return recent.map((h,i)=>`${i+1}. "${h.action?.text||h.action?.description||"?"}"`).join("\n");
 }
 
 function isSamePageHash(candidateUrl:string,currentUrl:string):boolean{
@@ -86,21 +82,22 @@ export async function resolve(stagehand:any,page:any,instruction:string,maxSteps
   let acted=false;
   let selector:string|undefined;
   try{
-   const obs=await stagehand.observe(`Goal: find "${instruction}" on this site.
+   const obs=await stagehand.observe(`Goal: find "${instruction}".
 
-Actions already taken so far on this site (most recent last) - do not repeat these, and if they look like partial progress through a multi-step filter/selection flow, continue that flow (e.g. if a grade/level was already selected, select the matching date/subject next, then submit):
+Prior actions this session (don't repeat; if mid-flow through filters, continue it):
 ${recap(history)}
 
-Candidate links/buttons already detected on this page (may be incomplete or approximate):
+Page candidates:
 ${summarize(candidates)}
 
-Pick the single best next action:
-- If one of the candidates above (or another visible link) leads directly to the exact file, choose it.
-- If this page has a multi-step filter/search UI (e.g. pick a category, then a date, then submit) and some filters are already selected per the actions above, pick the next unset filter or the submit/search button.
-- Do not click a submit/search button that already appears in the actions-taken list above - if you already clicked it and results still haven't appeared, look for an actual result/exam link instead, or a different next step.
-- If a search box is visible and would likely be faster or more reliable than browsing, choose that instead.
-- Otherwise choose the most specific/relevant navigation (category, date, article) over generic or unrelated links.
-Avoid choosing something that would leave the page unchanged or repeat an action already taken.`,{page,timeout:CALL_TIMEOUT});
+Next action:
+- Exact file link/button above (or elsewhere on page) -> pick it.
+- Mid multi-step filter flow -> pick next unset filter, then submit.
+- Already-clicked submit/search with no new results -> don't click it again; find an actual result link instead.
+- Site search box visible and likely faster -> use it.
+- Else -> most specific relevant nav (category/date/article), not generic links.
+Never repeat a prior action or pick something that leaves the page unchanged.
+Never pick actions that log out, delete, purchase, subscribe, or otherwise make an irreversible/account-affecting change - only read/navigate/search actions.`,{page,timeout:CALL_TIMEOUT});
    const next=obs?.data?.[0];
    if(next?.selector&&await act(next)){
     selector=next.selector;
