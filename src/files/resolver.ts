@@ -100,25 +100,30 @@ export async function resolve(stagehand:any,page:any,instruction:string,maxSteps
    ||candidates.find(c=>c.url&&sameHost(c.url,url)&&!isSamePageHash(c.url,url)&&KEYWORD_RE.test(c.text));
   if(direct?.url){const resolvedUrl=resolvePdfUrl(direct.url)||direct.url;history.push({url,action:direct});return{ok:true,url:resolvedUrl,history};}
 
+  // Exclude already-clicked selectors from what the LLM even sees, rather than just telling
+  // it not to repeat via prose: a structural guarantee is much stronger than an instruction
+  // the model can (and sometimes does) ignore.
+  const clicked=new Set(history.map(h=>h.action?.selector).filter(Boolean));
+  const freshCandidates=candidates.filter(c=>!(c.selector&&clicked.has(c.selector)));
+
   const beforeFiles=await snapshotDownloads();
   let acted=false;
   let selector:string|undefined;
   try{
    const obs=await stagehand.observe(`Goal: find "${instruction}".
 
-Prior actions this session (don't repeat; if mid-flow through filters, continue it):
+Prior actions this session (most recent last; the elements below are already excluded from the candidate list so you can't pick them again):
 ${recap(history)}
 
 Page candidates:
-${summarize(candidates)}
+${summarize(freshCandidates)}
 
 Next action:
 - Exact file link/button above (or elsewhere on page) -> pick it.
 - Mid multi-step filter flow -> pick next unset filter, then submit.
-- Already-clicked submit/search with no new results -> don't click it again; find an actual result link instead.
+- Already-clicked submit/search with no new results -> find an actual result link instead.
 - Site search box visible and likely faster -> use it.
 - Else -> most specific relevant nav (category/date/article), not generic links.
-Never repeat a prior action or pick something that leaves the page unchanged.
 Never pick actions that log out, delete, purchase, subscribe, or otherwise make an irreversible/account-affecting change - only read/navigate/search actions.`,{page,timeout:CALL_TIMEOUT});
    const next=obs?.data?.[0];
    if(next?.selector&&await click(next.selector,`Click "${next.description}".`)){
@@ -134,12 +139,11 @@ Never pick actions that log out, delete, purchase, subscribe, or otherwise make 
   }catch(e){console.error("observe step failed:",e instanceof Error?e.message:String(e));}
 
   if(!acted){
-   const clicked=new Set(history.map(h=>h.action?.selector).filter(Boolean));
    // Prefer non-nav (content/filter) candidates over generic chrome (menu/home links): with
    // no LLM guidance, blindly clicking a nav link is far more likely to reset/reload the page
    // (losing any expanded filter state) than to make real progress.
-   const action=candidates.find(c=>!c.nav&&(c.kind==="button"||c.kind==="link")&&!(c.selector&&clicked.has(c.selector)))
-    ||candidates.find(c=>(c.kind==="button"||c.kind==="link")&&!(c.selector&&clicked.has(c.selector)));
+   const action=freshCandidates.find(c=>!c.nav&&(c.kind==="button"||c.kind==="link"))
+    ||freshCandidates.find(c=>c.kind==="button"||c.kind==="link");
    if(!action)break;
    selector=action.selector;
    history.push({url,action});
