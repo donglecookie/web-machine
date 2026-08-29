@@ -1,5 +1,5 @@
 import {inspect,Candidate} from "../discovery/dom.js";
-import {KEYWORD_RE,sameHost,resolvePdfUrl} from "../discovery/patterns.js";
+import {KEYWORD_RE,sameHost,resolvePdfUrl,relevanceRatio} from "../discovery/patterns.js";
 import {readdir} from "node:fs/promises";
 
 // Strategy order (most general/common first, most site-specific last):
@@ -18,15 +18,21 @@ const TOP_N_LINK=15;
 const RECAP_STEPS=8;
 const DOWNLOADS_DIR="downloads";
 
-// Buttons (filters, tabs, selectors) are typically a finite, small set where missing even one
-// option (e.g. a subject filter among many) can silently steer the whole flow to the wrong
-// result. Content links (exam listings, articles) can also legitimately number in the dozens
-// on a results page (e.g. one entry per sub-subject under a category), so both get generous,
-// separate budgets rather than competing for the same handful of slots.
-function summarize(candidates:Candidate[]):string{
+// A fixed candidate count can never be "right" for every site - some pages have 3 relevant
+// links, others have hundreds. So instead of tuning the cap to any one site's volume, rank
+// content links by how well their own text matches the instruction (exam/article titles
+// usually do share literal words with what's being searched for, e.g. "사회문화") and take
+// the most relevant ones regardless of how many total candidates exist. Filter/selector
+// buttons are the exception: their labels are often categorical rather than lexical (e.g. a
+// "사회탐구" button won't textually match an instruction asking for "사회문화"), so relevance
+// scoring can't reliably pick among them - they get broad inclusion instead, up to a cap.
+function summarize(candidates:Candidate[],instruction:string):string{
+ const byRelevance=(c:Candidate)=>relevanceRatio(c.text,instruction);
  const nav=candidates.filter(c=>c.nav).slice(0,TOP_N_NAV);
- const buttons=candidates.filter(c=>!c.nav&&c.kind==="button").slice(0,TOP_N_BUTTON);
- const links=candidates.filter(c=>!c.nav&&c.kind!=="button").slice(0,TOP_N_LINK);
+ const buttons=candidates.filter(c=>!c.nav&&c.kind==="button")
+  .map(c=>({c,r:byRelevance(c)})).sort((a,b)=>b.r-a.r).slice(0,TOP_N_BUTTON).map(x=>x.c);
+ const links=candidates.filter(c=>!c.nav&&c.kind!=="button")
+  .map(c=>({c,r:byRelevance(c)})).sort((a,b)=>b.r-a.r).slice(0,TOP_N_LINK).map(x=>x.c);
  const picked=[...nav,...buttons,...links].filter((c,i,arr)=>arr.findIndex(x=>x.text===c.text&&x.url===c.url)===i);
  return picked.map((c,i)=>`${i+1}. [${c.kind}${c.nav?"/nav":""}] "${c.text.slice(0,80)}"${c.url?` -> ${c.url}`:""}`).join("\n")||"(none)";
 }
@@ -118,7 +124,7 @@ Prior actions this session (most recent last; the elements below are already exc
 ${recap(history)}
 
 Page candidates:
-${summarize(freshCandidates)}
+${summarize(freshCandidates,instruction)}
 
 Next action:
 - Exact file link/button above (or elsewhere on page) -> pick it.
