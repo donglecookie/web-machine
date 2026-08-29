@@ -100,9 +100,11 @@ export async function resolve(stagehand:any,page:any,instruction:string,maxSteps
    ||candidates.find(c=>c.url&&sameHost(c.url,url)&&!isSamePageHash(c.url,url)&&KEYWORD_RE.test(c.text));
   if(direct?.url){const resolvedUrl=resolvePdfUrl(direct.url)||direct.url;history.push({url,action:direct});return{ok:true,url:resolvedUrl,history};}
 
-  // Exclude already-clicked selectors from what the LLM even sees, rather than just telling
-  // it not to repeat via prose: a structural guarantee is much stronger than an instruction
-  // the model can (and sometimes does) ignore.
+  // Exclude already-clicked selectors from the candidate text we show the LLM, and enforce
+  // it as a hard constraint in the mechanical fallback below. Note this is not an absolute
+  // guarantee for the LLM path: observe() inspects the live page itself, not just our text
+  // hints, so it can in principle still name an already-clicked element - which is exactly
+  // why the stuck-loop check further down remains a necessary second line of defense.
   const clicked=new Set(history.map(h=>h.action?.selector).filter(Boolean));
   const freshCandidates=candidates.filter(c=>!(c.selector&&clicked.has(c.selector)));
 
