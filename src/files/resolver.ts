@@ -73,10 +73,13 @@ export async function resolve(stagehand:any,page:any,instruction:string,maxSteps
  // click fails - e.g. the page changed shape between observing and clicking. Bounded to a
  // short timeout so a missing/stale selector fails fast into the fallback rather than
  // waiting out the locator's own default actionability timeout first.
- const clickFast=(selector:string)=>Promise.race([
-  page.locator(selector).click().then(()=>true),
-  new Promise<boolean>(res=>setTimeout(()=>res(false),8000))
- ]).catch(()=>false);
+ const clickFast=(selector:string)=>new Promise<boolean>(resolve=>{
+  const timer=setTimeout(()=>resolve(false),8000);
+  page.locator(selector).click().then(
+   ()=>{clearTimeout(timer);resolve(true);},
+   ()=>{clearTimeout(timer);resolve(false);}
+  );
+ });
  const act=(target:any)=>stagehand.act(target,{page,timeout:CALL_TIMEOUT}).then(()=>true,()=>false);
  const click=async(selector:string,fallbackInstruction:string)=>await clickFast(selector)||await act(fallbackInstruction);
 
@@ -124,7 +127,7 @@ Never pick actions that log out, delete, purchase, subscribe, or otherwise make 
 
   if(!acted){
    const clicked=new Set(history.map(h=>h.action?.selector).filter(Boolean));
-  const action=candidates.find(c=>(c.kind==="button"||c.kind==="link")&&!(c.selector&&clicked.has(c.selector)));
+   const action=candidates.find(c=>(c.kind==="button"||c.kind==="link")&&!(c.selector&&clicked.has(c.selector)));
    if(!action)break;
    selector=action.selector;
    history.push({url,action});

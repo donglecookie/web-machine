@@ -5,6 +5,7 @@ import {searchWeb} from "./discovery/websearch.js";
 // 2. Trying each candidate in turn with the same site-navigation engine (WebMachine.fetch),
 //    since visiting any particular site is just a means to the end of getting the content.
 export async function discoverAndFetch(machine:any,stagehand:any,query:string,maxSites=3,maxStepsPerSite=6){
+ if(!machine.page)return{ok:false,message:"machine.open() must be called before discoverAndFetch().",attempts:[]};
  const results=await searchWeb(machine.page,stagehand,query);
  if(!results.length)return{ok:false,message:"Web search returned no candidate sites.",attempts:[]};
 
