@@ -123,7 +123,8 @@ Never pick actions that log out, delete, purchase, subscribe, or otherwise make 
   }catch(e){console.error("observe step failed:",e instanceof Error?e.message:String(e));}
 
   if(!acted){
-   const action=candidates.find(c=>c.kind==="button"||c.kind==="link");
+   const clicked=new Set(history.map(h=>h.action?.selector).filter(Boolean));
+  const action=candidates.find(c=>(c.kind==="button"||c.kind==="link")&&!(c.selector&&clicked.has(c.selector)));
    if(!action)break;
    selector=action.selector;
    history.push({url,action});
