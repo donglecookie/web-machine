@@ -1,5 +1,4 @@
-import {KEYWORD_RE,FileType,FILE_TYPES} from "./patterns.js";
-const DEFAULT_FILE_TYPE=FILE_TYPES[0];
+import {KEYWORD_RE,FileType,ANY_FILE_TYPE} from "./patterns.js";
 export type Candidate={kind:string;text:string;url?:string;selector?:string;score:number;nav:boolean};
 const EVAL_SOURCE=`(() => {
   const a = [];
@@ -44,7 +43,7 @@ const EVAL_SOURCE=`(() => {
   return a;
 })()`;
 const MAX_CANDIDATES=60;
-export async function inspect(page:any,fileType:FileType=DEFAULT_FILE_TYPE):Promise<Candidate[]>{
+export async function inspect(page:any,fileType:FileType=ANY_FILE_TYPE):Promise<Candidate[]>{
  const xs=await page.evaluate(EVAL_SOURCE);
  // This is a coarse initial ranking only - genuine relevance-to-instruction ranking happens
  // later via relevanceRatio in resolver.ts. Here we just want a reasonable starting order and

@@ -25,8 +25,11 @@ test("detectFileType picks the type named in the instruction (not always PDF)", 
  assert.equal(detectFileType("이미지 다운로드").name,"image");
 });
 
-test("detectFileType defaults to pdf when no specific type is named", () => {
- assert.equal(detectFileType("2025학년도 9월 모의평가 사회문화").name,"pdf");
+test("detectFileType falls back to the 'any' wildcard (not any single format) when nothing specific is named", () => {
+ const result=detectFileType("2025학년도 9월 모의평가 사회문화");
+ assert.equal(result.name,"any");
+ assert.ok(result.extRe.test("https://x.com/a.pdf")); // still matches known formats
+ assert.ok(result.extRe.test("https://x.com/a.xlsx"));
 });
 
 test("resolveFileUrl (pdf) returns the url itself when it already ends in .pdf", () => {

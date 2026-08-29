@@ -42,21 +42,34 @@ export const FILE_TYPES:FileType[]=[
  },aliases:["이미지","사진","image","png","jpg","jpeg"]},
  {name:"csv",primaryExt:"csv",extRe:/\.csv(?:$|[?#])/i,magic:()=>true,aliases:["csv"]}, // plain text, no reliable magic bytes
 ];
-const DEFAULT_FILE_TYPE=FILE_TYPES[0]; // pdf - the common case for this project (exam papers, reports)
+// A wildcard policy for when the instruction doesn't name any specific format: rather than
+// silently assuming PDF (or any other single type), match against every known extension, and
+// verify against every known REAL signature. csv is excluded from the magic check since it has
+// no reliable binary signature (magic always returns true) and would make the wildcard check
+// meaningless if included.
+const VERIFIABLE_TYPES=FILE_TYPES.filter(t=>t.name!=="csv");
+export const ANY_FILE_TYPE:FileType={
+ name:"any",
+ primaryExt:"",
+ extRe:new RegExp(FILE_TYPES.map(t=>t.extRe.source).join("|"),"i"),
+ magic:b=>VERIFIABLE_TYPES.some(t=>t.magic(b)),
+ aliases:[]
+};
 
-// Pick the target file type from what the instruction actually asks for, instead of assuming
-// PDF unconditionally. Falls back to PDF when nothing more specific is named, since that
-// remains the dominant real-world case here, not because other types are unsupported.
+// Pick the target file type from what the instruction actually asks for. When nothing specific
+// is named, don't default to any one format (PDF included) - that would just be a different
+// flavor of the same bias this was built to remove. Fall back to the "any known type" wildcard
+// instead, so an unqualified request stays genuinely format-agnostic.
 export function detectFileType(instruction:string):FileType{
  const lower=instruction.toLowerCase();
- return FILE_TYPES.find(t=>t.aliases.some(a=>lower.includes(a.toLowerCase())))||DEFAULT_FILE_TYPE;
+ return FILE_TYPES.find(t=>t.aliases.some(a=>lower.includes(a.toLowerCase())))||ANY_FILE_TYPE;
 }
 
 // File-format viewers (PDF.js, Office Online embeds, etc.) often load the actual file via a
 // query parameter on a wrapper/viewer URL (e.g. "viewer.html?file=...%2Freal.pdf") rather
 // than the visible URL itself ending in the right extension. Unwrap that case so we resolve
 // the real file, not the viewer page.
-export function resolveFileUrl(url:string,fileType:FileType=DEFAULT_FILE_TYPE):string|null{
+export function resolveFileUrl(url:string,fileType:FileType=ANY_FILE_TYPE):string|null{
  if(fileType.extRe.test(url))return url;
  try{
   const u=new URL(url);

@@ -1,8 +1,7 @@
 import {readFile,stat} from "node:fs/promises";import {createHash} from "node:crypto";
-import {FileType,FILE_TYPES} from "../discovery/patterns.js";
-const DEFAULT_FILE_TYPE=FILE_TYPES[0]; // pdf
+import {FileType,ANY_FILE_TYPE} from "../discovery/patterns.js";
 
-export async function verify(filePath:string,fileType:FileType=DEFAULT_FILE_TYPE){
+export async function verify(filePath:string,fileType:FileType=ANY_FILE_TYPE){
  const info=await stat(filePath);const data=await readFile(filePath);const matchesType=fileType.magic(data);
  // matchesType must gate success, not just ride along as metadata: a non-empty response that
  // isn't actually the requested file type (e.g. an HTML error/login page saved where a PDF

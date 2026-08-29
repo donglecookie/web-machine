@@ -3,8 +3,7 @@
 // before falling back to the full browser-driven WebMachine for pages that need real
 // interaction (clicks, JS-rendered content, native downloads).
 
-import {KEYWORD_RE,sameHost,resolveFileUrl,FileType,FILE_TYPES} from "../discovery/patterns.js";
-const DEFAULT_FILE_TYPE=FILE_TYPES[0];
+import {KEYWORD_RE,sameHost,resolveFileUrl,FileType,ANY_FILE_TYPE} from "../discovery/patterns.js";
 const DEFAULT_HEADERS={
  "User-Agent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
  "Accept-Language":"en-US,en;q=0.9"
@@ -35,7 +34,7 @@ export class HtmlMachine{
 
  // Quick pass: does the raw HTML already contain an obvious direct file link, without
  // needing a browser at all? Mirrors the DOM "direct match" heuristic used by WebMachine.
- async findDirectFile(url:string,fileType:FileType=DEFAULT_FILE_TYPE):Promise<string|null>{
+ async findDirectFile(url:string,fileType:FileType=ANY_FILE_TYPE):Promise<string|null>{
   const html=await this.fetchHtml(url);
   if(!html)return null;
   const links=this.extractLinks(html,url);

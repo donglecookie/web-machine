@@ -36,11 +36,23 @@ test("verify() fails for a non-PDF file even if it has content (e.g. an HTML err
  });
 });
 
-test("verify() defaults to the pdf policy when no fileType is given", async () => {
+test("verify() defaults to the 'any' wildcard policy when no fileType is given - accepts any known real format", async () => {
  await withTempFile("real.pdf",Buffer.from("%PDF-1.4\n..."),async(filePath)=>{
   const result=await verify(filePath);
   assert.equal(result.ok,true);
-  assert.equal(result.fileType,"pdf");
+  assert.equal(result.fileType,"any");
+ });
+ const zipSignature=Buffer.from([0x50,0x4b,0x03,0x04,0,0,0,0]);
+ await withTempFile("budget.xlsx",zipSignature,async(filePath)=>{
+  const result=await verify(filePath); // no fileType passed - should still accept a real xlsx
+  assert.equal(result.ok,true);
+ });
+});
+
+test("verify() with the 'any' wildcard still rejects content matching no known format", async () => {
+ await withTempFile("junk.bin",Buffer.from("not a recognizable file format at all"),async(filePath)=>{
+  const result=await verify(filePath);
+  assert.equal(result.ok,false);
  });
 });
 
