@@ -1,5 +1,5 @@
 import {inspect,Candidate} from "../discovery/dom.js";
-import {KEYWORD_RE,sameHost,resolvePdfUrl,relevanceRatio} from "../discovery/patterns.js";
+import {KEYWORD_RE,sameHost,resolvePdfUrl,tokenize,relevanceRatioTokens} from "../discovery/patterns.js";
 import {readdir} from "node:fs/promises";
 
 // Strategy order (most general/common first, most site-specific last):
@@ -20,14 +20,16 @@ const DOWNLOADS_DIR="downloads";
 
 // A fixed candidate count can never be "right" for every site - some pages have 3 relevant
 // links, others have hundreds. So instead of tuning the cap to any one site's volume, rank
-// content links by how well their own text matches the instruction (exam/article titles
-// usually do share literal words with what's being searched for, e.g. "사회문화") and take
-// the most relevant ones regardless of how many total candidates exist. Filter/selector
-// buttons are the exception: their labels are often categorical rather than lexical (e.g. a
+// both buttons and content links by how well their own text matches the instruction (exam
+// titles usually do share literal words with what's being searched for, e.g. "사회문화") and
+// take the most relevant ones regardless of how many total candidates exist. This helps most
+// for links; filter/selector button labels are often categorical rather than lexical (e.g. a
 // "사회탐구" button won't textually match an instruction asking for "사회문화"), so relevance
-// scoring can't reliably pick among them - they get broad inclusion instead, up to a cap.
+// sorting is only a tie-break bonus there (ties fall back to original order, a stable sort) -
+// which is why buttons still get a much broader inclusion cap than links.
 function summarize(candidates:Candidate[],instruction:string):string{
- const byRelevance=(c:Candidate)=>relevanceRatio(c.text,instruction);
+ const tokens=tokenize(instruction);
+ const byRelevance=(c:Candidate)=>relevanceRatioTokens(c.text,tokens);
  const nav=candidates.filter(c=>c.nav).slice(0,TOP_N_NAV);
  const buttons=candidates.filter(c=>!c.nav&&c.kind==="button")
   .map(c=>({c,r:byRelevance(c)})).sort((a,b)=>b.r-a.r).slice(0,TOP_N_BUTTON).map(x=>x.c);

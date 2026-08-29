@@ -24,13 +24,17 @@ export function resolvePdfUrl(url:string):string|null{
 // same-page candidate (e.g. a different subject/date under identical filter selections) can
 // still download a valid-but-irrelevant file and look like a clean success. This gives a
 // rough, honest signal of whether the result plausibly matches what was asked for, based on
-// how many distinctive words from the instruction appear in the resulting filename/URL.
-function tokenize(s:string):string[]{
+// how many distinctive words from the instruction appear in the resulting filename/URL. Also
+// used (via relevanceRatioTokens) to rank page candidates by relevance to the instruction
+// instead of relying on a fixed, site-tuned candidate count.
+export function tokenize(s:string):string[]{
  return s.toLowerCase().split(/[\s,·\-–—/|_()]+/).map(t=>t.trim()).filter(t=>t.length>=2);
 }
-export function relevanceRatio(text:string,instruction:string):number{
- const tokens=tokenize(instruction);
+export function relevanceRatioTokens(text:string,tokens:string[]):number{
  if(!tokens.length)return 1;
  const t=text.toLowerCase();
  return tokens.filter(tok=>t.includes(tok)).length/tokens.length;
+}
+export function relevanceRatio(text:string,instruction:string):number{
+ return relevanceRatioTokens(text,tokenize(instruction));
 }
