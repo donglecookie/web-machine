@@ -1,9 +1,21 @@
-import {resolve} from "../files/resolver.js";import {download} from "../files/download.js";import {verify} from "../verification/file.js";import {HtmlMachine} from "./HtmlMachine.js";
+import {resolve} from "../files/resolver.js";import {download} from "../files/download.js";import {verify} from "../verification/file.js";import {HtmlMachine} from "./HtmlMachine.js";import {relevanceRatio} from "../discovery/patterns.js";
 const BLOCKED_DOMAINS=[
  "googlesyndication.com","doubleclick.net","google-analytics.com","googletagmanager.com",
  "adtrafficquality.google","fundingchoicesmessages.google.com","googleadservices.com",
  "amazon-adsystem.com","facebook.net","connect.facebook.net"
 ];
+const RELEVANCE_WARN_THRESHOLD=0.5;
+
+function withRelevanceCheck(result:any,instruction:string):any{
+ if(!result.ok)return result;
+ const path=result.path||result.url||"";
+ const relevance=relevanceRatio(path,instruction);
+ if(relevance<RELEVANCE_WARN_THRESHOLD){
+  return{...result,warning:`Downloaded file may not match the request (filename relevance ${(relevance*100).toFixed(0)}% - verify manually): "${path}"`};
+ }
+ return result;
+}
+
 export class WebMachine{
  page:any;
  private policySet=false;
@@ -31,18 +43,20 @@ export class WebMachine{
   const currentUrl=this.page?await this.page.url().catch(()=>null):null;
   if(currentUrl&&currentUrl!=="about:blank"){
    const direct=await this.html.findDirectFile(currentUrl).catch(()=>null);
-   if(direct)return this.downloadAndVerify(direct,[{url:currentUrl,action:{kind:"html-direct",url:direct}}]);
+   if(direct)return withRelevanceCheck(await this.downloadAndVerify(direct,[{url:currentUrl,action:{kind:"html-direct",url:direct}}]),instruction);
   }
 
   let found:any;
   try{found=await resolve(this.stagehand,this.page,instruction,maxSteps);}
   catch(e){return{ok:false,message:`resolve failed: ${e instanceof Error?e.message:String(e)}`,history:[]};}
   if(found.downloadedFile){
-   try{const verification=await verify(found.downloadedFile);return{ok:verification.ok,path:found.downloadedFile,verification,history:found.history};}
-   catch(e){return{ok:false,message:e instanceof Error?e.message:String(e),history:found.history};}
+   try{
+    const verification=await verify(found.downloadedFile);
+    return withRelevanceCheck({ok:verification.ok,path:found.downloadedFile,verification,history:found.history},instruction);
+   }catch(e){return{ok:false,message:e instanceof Error?e.message:String(e),history:found.history};}
   }
   if(!found.ok||!found.url)return{ok:false,message:"No file URL found.",history:found.history};
-  return this.downloadAndVerify(found.url,found.history);
+  return withRelevanceCheck(await this.downloadAndVerify(found.url,found.history),instruction);
  }
  async close(){
   try{await this.stagehand.close();}

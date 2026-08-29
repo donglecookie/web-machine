@@ -19,3 +19,18 @@ export function resolvePdfUrl(url:string):string|null{
  }catch{}
  return null;
 }
+
+// verify() only confirms a file is a non-empty PDF, not that it's the RIGHT PDF - a wrong
+// same-page candidate (e.g. a different subject/date under identical filter selections) can
+// still download a valid-but-irrelevant file and look like a clean success. This gives a
+// rough, honest signal of whether the result plausibly matches what was asked for, based on
+// how many distinctive words from the instruction appear in the resulting filename/URL.
+function tokenize(s:string):string[]{
+ return s.toLowerCase().split(/[\s,·\-–—/|_()]+/).map(t=>t.trim()).filter(t=>t.length>=2);
+}
+export function relevanceRatio(text:string,instruction:string):number{
+ const tokens=tokenize(instruction);
+ if(!tokens.length)return 1;
+ const t=text.toLowerCase();
+ return tokens.filter(tok=>t.includes(tok)).length/tokens.length;
+}
