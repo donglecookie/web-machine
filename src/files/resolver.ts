@@ -140,13 +140,18 @@ Never pick actions that log out, delete, purchase, subscribe, or otherwise make 
   // told not to. (URL staying the same is NOT itself a sign of being stuck - many sites drive
   // multi-step filter flows entirely through client-side state on one URL.)
   const prev=history[history.length-2]?.action?.selector;
-  if(selector&&selector===prev)break;
+  if(selector&&selector===prev){
+   console.error(`resolve: clicked the same element twice in a row ("${selector}") with no detectable file/download - stopping.`);
+   break;
+  }
 
   if(acted){
-   await page.waitForTimeout(1200);
+   await page.waitForTimeout(3000);
+   page=await syncActivePage(stagehand,page);
    const downloadedFile=await newDownloadedFile(beforeFiles);
    if(downloadedFile)return{ok:true,downloadedFile,history};
-   page=await syncActivePage(stagehand,page);
+   const postClickUrl=await page.url().catch(()=>"");
+   if(FILE_RE.test(postClickUrl))return{ok:true,url:postClickUrl,history};
   }
 
   await page.waitForTimeout(500);
