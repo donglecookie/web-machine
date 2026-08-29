@@ -1,4 +1,4 @@
-import {resolve} from "../files/resolver.js";import {download} from "../files/download.js";import {verify} from "../verification/file.js";import {HtmlMachine} from "./HtmlMachine.js";import {relevanceRatio} from "../discovery/patterns.js";
+import {resolve,newBudget,Budget} from "../files/resolver.js";import {download} from "../files/download.js";import {verify} from "../verification/file.js";import {HtmlMachine} from "./HtmlMachine.js";import {relevanceRatio} from "../discovery/patterns.js";
 const BLOCKED_DOMAINS=[
  "googlesyndication.com","doubleclick.net","google-analytics.com","googletagmanager.com",
  "adtrafficquality.google","fundingchoicesmessages.google.com","googleadservices.com",
@@ -37,7 +37,7 @@ export class WebMachine{
   try{const file=await download(url);const verification=await verify(file.path);return{ok:verification.ok,url:file.url,path:file.path,verification,history};}
   catch(e){return{ok:false,url,message:e instanceof Error?e.message:String(e),history};}
  }
- async fetch(instruction:string,maxSteps=8){
+ async fetch(instruction:string,maxSteps=8,budget:Budget=newBudget()){
   // Fast path: check the raw HTML of the current page for an obvious direct file link
   // before spinning up the full browser-driven resolve() loop.
   const currentUrl=this.page?await this.page.url().catch(()=>null):null;
@@ -47,7 +47,7 @@ export class WebMachine{
   }
 
   let found:any;
-  try{found=await resolve(this.stagehand,this.page,instruction,maxSteps);}
+  try{found=await resolve(this.stagehand,this.page,instruction,maxSteps,budget);}
   catch(e){return{ok:false,message:`resolve failed: ${e instanceof Error?e.message:String(e)}`,history:[]};}
   if(found.downloadedFile){
    try{

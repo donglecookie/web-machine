@@ -62,3 +62,11 @@ npm install
 npm run install-browser
 TEST_URL=https://example.com npm run test -- "찾고 싶은 파일이나 자료 설명"
 ```
+
+## 단위 테스트
+
+브라우저나 LLM 없이 순수 로직(PDF URL 추출, 파일 검증, 관련성 계산 등)만 검증합니다:
+```bash
+npm run test:unit
+```
+CI(GitHub Actions)에서 타입체크와 함께 매 push마다 자동 실행됩니다.

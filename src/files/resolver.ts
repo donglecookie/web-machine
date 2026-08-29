@@ -17,6 +17,15 @@ const TOP_N_BUTTON=30;
 const TOP_N_LINK=15;
 const RECAP_STEPS=8;
 const DOWNLOADS_DIR="downloads";
+const DEFAULT_MAX_LLM_CALLS=20;
+
+// A per-run cap on actual LLM calls (observe + act), independent of maxSteps. maxSteps alone
+// doesn't bound cost: a single "step" can trigger an observe() plus one or two act() calls
+// (self-heal fallback, search-box typing). Passing one Budget across multiple resolve() calls
+// (e.g. across several candidate sites in discoverAndFetch) lets the caller cap total spend
+// for the whole job, not just per site.
+export type Budget={llmCalls:number;maxLlmCalls:number};
+export function newBudget(maxLlmCalls=DEFAULT_MAX_LLM_CALLS):Budget{return{llmCalls:0,maxLlmCalls};}
 
 // A fixed candidate count can never be "right" for every site - some pages have 3 relevant
 // links, others have hundreds. So instead of tuning the cap to any one site's volume, rank
@@ -80,8 +89,9 @@ async function syncActivePage(stagehand:any,current:any):Promise<any>{
  }catch{return current;}
 }
 
-export async function resolve(stagehand:any,page:any,instruction:string,maxSteps=8){
+export async function resolve(stagehand:any,page:any,instruction:string,maxSteps=8,budget:Budget=newBudget()){
  const history:any[]=[];
+ let budgetWarned=false;
  // observe() already grounds a concrete selector, so execute it directly via the
  // Playwright-style Locator API (no LLM call) instead of re-asking the model what to do.
  // Only fall back to the LLM-driven act() (which re-reasons and self-heals) if the direct
@@ -95,7 +105,7 @@ export async function resolve(stagehand:any,page:any,instruction:string,maxSteps
    ()=>{clearTimeout(timer);settle(false);}
   );
  });
- const act=(target:any)=>stagehand.act(target,{page,timeout:CALL_TIMEOUT}).then(()=>true,()=>false);
+ const act=(target:any)=>{budget.llmCalls++;return stagehand.act(target,{page,timeout:CALL_TIMEOUT}).then(()=>true,()=>false);};
  const click=async(selector:string,fallbackInstruction:string)=>await clickFast(selector)||await act(fallbackInstruction);
 
  for(let i=0;i<maxSteps;i++){
@@ -119,8 +129,10 @@ export async function resolve(stagehand:any,page:any,instruction:string,maxSteps
   const beforeFiles=await snapshotDownloads();
   let acted=false;
   let selector:string|undefined;
-  try{
-   const obs=await stagehand.observe(`Goal: find "${instruction}".
+  if(budget.llmCalls<budget.maxLlmCalls){
+   try{
+    budget.llmCalls++;
+    const obs=await stagehand.observe(`Goal: find "${instruction}".
 
 Prior actions this session (most recent last; the elements below are already excluded from the candidate list so you can't pick them again):
 ${recap(history)}
@@ -135,30 +147,35 @@ Next action:
 - Site search box visible and likely faster -> use it.
 - Else -> most specific relevant nav (category/date/article), not generic links.
 Never pick actions that log out, delete, purchase, subscribe, or otherwise make an irreversible/account-affecting change - only read/navigate/search actions.`,{page,timeout:CALL_TIMEOUT});
-   const next=obs?.data?.[0];
-   if(next?.selector&&await click(next.selector,`Click "${next.description}".`)){
-    selector=next.selector;
-    history.push({url,action:{kind:"observe",text:next.description,selector:next.selector}});
-    if(/search|검색/i.test(next.description)){
-     await page.waitForTimeout(300);
-     await act(`Type "${instruction}" into the search input field and press Enter to submit the search.`);
-     await page.waitForTimeout(1000);
+    const next=obs?.data?.[0];
+    if(next?.selector&&await click(next.selector,`Click "${next.description}".`)){
+     selector=next.selector;
+     history.push({url,action:{kind:"observe",text:next.description,selector:next.selector}});
+     if(/search|검색/i.test(next.description)){
+      await page.waitForTimeout(300);
+      await act(`Type "${instruction}" into the search input field and press Enter to submit the search.`);
+      await page.waitForTimeout(1000);
+     }
+     acted=true;
     }
-    acted=true;
-   }
-  }catch(e){console.error("observe step failed:",e instanceof Error?e.message:String(e));}
+   }catch(e){console.error("observe step failed:",e instanceof Error?e.message:String(e));}
+  }else if(!budgetWarned){
+   console.error(`resolve: LLM call budget exhausted (${budget.maxLlmCalls}) - continuing with free heuristic clicks only.`);
+   budgetWarned=true;
+  }
 
   if(!acted){
    // Prefer non-nav (content/filter) candidates over generic chrome (menu/home links): with
    // no LLM guidance, blindly clicking a nav link is far more likely to reset/reload the page
-   // (losing any expanded filter state) than to make real progress.
+   // (losing any expanded filter state) than to make real progress. Uses clickFast() only
+   // (never the LLM self-heal fallback) so this path stays free even once the budget is spent.
    const action=freshCandidates.find(c=>!c.nav&&(c.kind==="button"||c.kind==="link"))
     ||freshCandidates.find(c=>c.kind==="button"||c.kind==="link");
    if(!action)break;
    selector=action.selector;
    history.push({url,action});
    const ok=action.selector
-    ?await click(action.selector,`Click the element with selector ${action.selector}.`)
+    ?await clickFast(action.selector)
     :action.url
     ?await page.goto(action.url,{waitUntil:"domcontentloaded",timeout:CALL_TIMEOUT}).then(()=>true,()=>false)
     :false;

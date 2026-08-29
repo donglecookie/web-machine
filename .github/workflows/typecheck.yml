@@ -1,4 +1,4 @@
-name: Typecheck
+name: Typecheck & Unit Tests
 on: [push,pull_request]
 jobs:
   typecheck:
@@ -9,3 +9,4 @@ jobs:
         with: {node-version: 22, cache: npm}
       - run: npm install
       - run: npm run typecheck
+      - run: npm run test:unit
