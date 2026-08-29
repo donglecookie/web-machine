@@ -1,5 +1,5 @@
 import {inspect,Candidate} from "../discovery/dom.js";
-import {FILE_RE,KEYWORD_RE,sameHost,resolvePdfUrl} from "../discovery/patterns.js";
+import {KEYWORD_RE,sameHost,resolvePdfUrl} from "../discovery/patterns.js";
 import {readdir} from "node:fs/promises";
 
 // Strategy order (most general/common first, most site-specific last):
@@ -73,11 +73,11 @@ export async function resolve(stagehand:any,page:any,instruction:string,maxSteps
  // click fails - e.g. the page changed shape between observing and clicking. Bounded to a
  // short timeout so a missing/stale selector fails fast into the fallback rather than
  // waiting out the locator's own default actionability timeout first.
- const clickFast=(selector:string)=>new Promise<boolean>(resolve=>{
-  const timer=setTimeout(()=>resolve(false),8000);
+ const clickFast=(selector:string)=>new Promise<boolean>(settle=>{
+  const timer=setTimeout(()=>settle(false),8000);
   page.locator(selector).click().then(
-   ()=>{clearTimeout(timer);resolve(true);},
-   ()=>{clearTimeout(timer);resolve(false);}
+   ()=>{clearTimeout(timer);settle(true);},
+   ()=>{clearTimeout(timer);settle(false);}
   );
  });
  const act=(target:any)=>stagehand.act(target,{page,timeout:CALL_TIMEOUT}).then(()=>true,()=>false);
@@ -85,12 +85,11 @@ export async function resolve(stagehand:any,page:any,instruction:string,maxSteps
 
  for(let i=0;i<maxSteps;i++){
   const url=await page.url().catch(()=>history[history.length-1]?.url||"");
-  const resolvedUrl0=resolvePdfUrl(url);
-  if(resolvedUrl0)return{ok:true,url:resolvedUrl0,history};
+  const resolvedCurrentUrl=resolvePdfUrl(url);
+  if(resolvedCurrentUrl)return{ok:true,url:resolvedCurrentUrl,history};
 
   const candidates=await inspect(page).catch(()=>[]);
-  const direct=candidates.find(c=>c.url&&FILE_RE.test(c.url))
-   ||candidates.find(c=>c.url&&resolvePdfUrl(c.url))
+  const direct=candidates.find(c=>c.url&&resolvePdfUrl(c.url))
    ||candidates.find(c=>c.url&&sameHost(c.url,url)&&!isSamePageHash(c.url,url)&&KEYWORD_RE.test(c.text));
   if(direct?.url){const resolvedUrl=resolvePdfUrl(direct.url)||direct.url;history.push({url,action:direct});return{ok:true,url:resolvedUrl,history};}
 

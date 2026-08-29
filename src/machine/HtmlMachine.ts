@@ -3,7 +3,7 @@
 // before falling back to the full browser-driven WebMachine for pages that need real
 // interaction (clicks, JS-rendered content, native downloads).
 
-import {FILE_RE,KEYWORD_RE,sameHost,resolvePdfUrl} from "../discovery/patterns.js";
+import {KEYWORD_RE,sameHost,resolvePdfUrl} from "../discovery/patterns.js";
 const DEFAULT_HEADERS={
  "User-Agent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
  "Accept-Language":"en-US,en;q=0.9"
@@ -38,7 +38,7 @@ export class HtmlMachine{
   const html=await this.fetchHtml(url);
   if(!html)return null;
   const links=this.extractLinks(html,url);
-  const direct=links.find(l=>FILE_RE.test(l.url))
+  const direct=links.find(l=>resolvePdfUrl(l.url))
    ||links.find(l=>sameHost(l.url,url)&&KEYWORD_RE.test(l.text));
   if(!direct?.url)return null;
   return resolvePdfUrl(direct.url)||direct.url;
