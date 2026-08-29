@@ -135,7 +135,11 @@ Never pick actions that log out, delete, purchase, subscribe, or otherwise make 
 
   if(!acted){
    const clicked=new Set(history.map(h=>h.action?.selector).filter(Boolean));
-   const action=candidates.find(c=>(c.kind==="button"||c.kind==="link")&&!(c.selector&&clicked.has(c.selector)));
+   // Prefer non-nav (content/filter) candidates over generic chrome (menu/home links): with
+   // no LLM guidance, blindly clicking a nav link is far more likely to reset/reload the page
+   // (losing any expanded filter state) than to make real progress.
+   const action=candidates.find(c=>!c.nav&&(c.kind==="button"||c.kind==="link")&&!(c.selector&&clicked.has(c.selector)))
+    ||candidates.find(c=>(c.kind==="button"||c.kind==="link")&&!(c.selector&&clicked.has(c.selector)));
    if(!action)break;
    selector=action.selector;
    history.push({url,action});
