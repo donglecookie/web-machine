@@ -42,7 +42,7 @@ const EVAL_SOURCE=`(() => {
   });
   return a;
 })()`;
-const MAX_CANDIDATES=30;
+const MAX_CANDIDATES=60;
 export async function inspect(page:any):Promise<Candidate[]>{
  const xs=await page.evaluate(EVAL_SOURCE);
  const scored=xs.map((x:any)=>{const s=x.text.toLowerCase();let score=0;if(/pdf|첨부|다운로드|download|문제|사회문화|사회·문화|파일|attachment/.test(s))score+=60;if(x.kind==="download")score+=40;if(FILE_RE.test(x.url||""))score+=100;return{...x,score};});

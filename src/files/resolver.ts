@@ -13,14 +13,21 @@ import {readdir} from "node:fs/promises";
 
 const CALL_TIMEOUT=60000;
 const TOP_N_NAV=4;
-const TOP_N_CONTENT=6;
+const TOP_N_BUTTON=15;
+const TOP_N_LINK=5;
 const RECAP_STEPS=8;
 const DOWNLOADS_DIR="downloads";
 
+// Buttons (filters, tabs, selectors) are typically a finite, small set where missing even one
+// option (e.g. a subject filter among many) can silently steer the whole flow to the wrong
+// result. Content links (exam listings, articles) can be numerous and are fine to truncate
+// more aggressively - so they get separate, unequal budgets rather than competing for the
+// same slots.
 function summarize(candidates:Candidate[]):string{
  const nav=candidates.filter(c=>c.nav).slice(0,TOP_N_NAV);
- const content=candidates.filter(c=>!c.nav).slice(0,TOP_N_CONTENT);
- const picked=[...nav,...content].filter((c,i,arr)=>arr.findIndex(x=>x.text===c.text&&x.url===c.url)===i);
+ const buttons=candidates.filter(c=>!c.nav&&c.kind==="button").slice(0,TOP_N_BUTTON);
+ const links=candidates.filter(c=>!c.nav&&c.kind!=="button").slice(0,TOP_N_LINK);
+ const picked=[...nav,...buttons,...links].filter((c,i,arr)=>arr.findIndex(x=>x.text===c.text&&x.url===c.url)===i);
  return picked.map((c,i)=>`${i+1}. [${c.kind}${c.nav?"/nav":""}] "${c.text.slice(0,80)}"${c.url?` -> ${c.url}`:""}`).join("\n")||"(none)";
 }
 
