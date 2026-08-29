@@ -33,10 +33,11 @@ const EVAL_SOURCE=`(() => {
     }
     if (text || url) a.push({ kind, text, url: url || undefined, selector: cssPath(e) || undefined, nav: Boolean(e.closest("nav,header")) });
   }
-  document.querySelectorAll('a[href],[download],button,[role=button],[role=tab],[tabindex="0"],iframe[src]').forEach((e) => {
+  document.querySelectorAll('a[href],[download],button,[role=button],[role=tab],[tabindex="0"],iframe[src],embed[src],object[data]').forEach((e) => {
     if (e.hasAttribute("download")) add("download", e, e.href || e.getAttribute("href"));
     else if (e.tagName === "A") add("link", e, e.href);
-    else if (e.tagName === "IFRAME") add("frame", e, e.src);
+    else if (e.tagName === "IFRAME" || e.tagName === "EMBED") add("frame", e, e.src);
+    else if (e.tagName === "OBJECT") add("frame", e, e.getAttribute("data"));
     else add("button", e);
   });
   return a;

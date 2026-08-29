@@ -1,5 +1,5 @@
 import {inspect,Candidate} from "../discovery/dom.js";
-import {FILE_RE,KEYWORD_RE,sameHost} from "../discovery/patterns.js";
+import {FILE_RE,KEYWORD_RE,sameHost,resolvePdfUrl} from "../discovery/patterns.js";
 import {readdir} from "node:fs/promises";
 
 // Strategy order (most general/common first, most site-specific last):
@@ -85,12 +85,14 @@ export async function resolve(stagehand:any,page:any,instruction:string,maxSteps
 
  for(let i=0;i<maxSteps;i++){
   const url=await page.url().catch(()=>history[history.length-1]?.url||"");
-  if(FILE_RE.test(url))return{ok:true,url,history};
+  const resolvedUrl0=resolvePdfUrl(url);
+  if(resolvedUrl0)return{ok:true,url:resolvedUrl0,history};
 
   const candidates=await inspect(page).catch(()=>[]);
   const direct=candidates.find(c=>c.url&&FILE_RE.test(c.url))
+   ||candidates.find(c=>c.url&&resolvePdfUrl(c.url))
    ||candidates.find(c=>c.url&&sameHost(c.url,url)&&!isSamePageHash(c.url,url)&&KEYWORD_RE.test(c.text));
-  if(direct?.url){history.push({url,action:direct});return{ok:true,url:direct.url,history};}
+  if(direct?.url){const resolvedUrl=resolvePdfUrl(direct.url)||direct.url;history.push({url,action:direct});return{ok:true,url:resolvedUrl,history};}
 
   const beforeFiles=await snapshotDownloads();
   let acted=false;
@@ -155,7 +157,8 @@ Never pick actions that log out, delete, purchase, subscribe, or otherwise make 
    const downloadedFile=await newDownloadedFile(beforeFiles);
    if(downloadedFile)return{ok:true,downloadedFile,history};
    const postClickUrl=await page.url().catch(()=>"");
-   if(FILE_RE.test(postClickUrl))return{ok:true,url:postClickUrl,history};
+   const resolvedPostClickUrl=resolvePdfUrl(postClickUrl);
+   if(resolvedPostClickUrl)return{ok:true,url:resolvedPostClickUrl,history};
   }
 
   await page.waitForTimeout(500);
