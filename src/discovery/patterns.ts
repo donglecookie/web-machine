@@ -24,36 +24,41 @@ export type FileType={
  extRe:RegExp; // matches the file's extension at the end of a path/query value
  magic:(data:Buffer)=>boolean; // verifies the downloaded bytes actually look like this type
  aliases:string[]; // Korean/English words in an instruction that imply this type
+ mimeRe:RegExp; // matches this type's real Content-Type header (often doesn't contain the
+                // extension/name as a substring, e.g. xlsx is "...spreadsheetml.sheet")
 };
 
 // Extend this list to support more file types - each entry is self-contained (extension
-// pattern, content signature, and the words that imply it), so adding one doesn't require
-// touching resolver/verification logic elsewhere.
+// pattern, content signature, MIME pattern, and the words that imply it), so adding one
+// doesn't require touching resolver/verification logic elsewhere.
 export const FILE_TYPES:FileType[]=[
- {name:"pdf",primaryExt:"pdf",extRe:/\.pdf(?:$|[?#])/i,magic:b=>b.subarray(0,5).toString()==="%PDF-",aliases:["pdf"]},
- {name:"xlsx",primaryExt:"xlsx",extRe:/\.xlsx?(?:$|[?#])/i,magic:b=>isZipContainer(b)||isOleContainer(b),aliases:["엑셀","excel","xlsx","xls","스프레드시트","spreadsheet"]},
- {name:"docx",primaryExt:"docx",extRe:/\.docx?(?:$|[?#])/i,magic:b=>isZipContainer(b)||isOleContainer(b),aliases:["워드","word","docx","한글워드"]},
- {name:"pptx",primaryExt:"pptx",extRe:/\.pptx?(?:$|[?#])/i,magic:b=>isZipContainer(b)||isOleContainer(b),aliases:["파워포인트","powerpoint","pptx","ppt","슬라이드","slide"]},
- {name:"hwp",primaryExt:"hwp",extRe:/\.hwpx?(?:$|[?#])/i,magic:b=>isOleContainer(b)||isZipContainer(b),aliases:["한글파일","hwp","hwpx"]},
- {name:"zip",primaryExt:"zip",extRe:/\.(?:zip|7z|rar)(?:$|[?#])/i,magic:b=>isZipContainer(b)||b.subarray(0,4).toString("hex")==="526172"||b.subarray(0,2).toString("hex")==="377a",aliases:["압축","압축파일","zip","알집"]},
+ {name:"pdf",primaryExt:"pdf",extRe:/\.pdf(?:$|[?#])/i,magic:b=>b.subarray(0,5).toString()==="%PDF-",aliases:["pdf"],mimeRe:/\bpdf\b/i},
+ {name:"xlsx",primaryExt:"xlsx",extRe:/\.xlsx?(?:$|[?#])/i,magic:b=>isZipContainer(b)||isOleContainer(b),aliases:["엑셀","excel","xlsx","xls","스프레드시트","spreadsheet"],mimeRe:/spreadsheetml|ms-excel/i},
+ {name:"docx",primaryExt:"docx",extRe:/\.docx?(?:$|[?#])/i,magic:b=>isZipContainer(b)||isOleContainer(b),aliases:["워드","word","docx","한글워드"],mimeRe:/wordprocessingml|msword/i},
+ {name:"pptx",primaryExt:"pptx",extRe:/\.pptx?(?:$|[?#])/i,magic:b=>isZipContainer(b)||isOleContainer(b),aliases:["파워포인트","powerpoint","pptx","ppt","슬라이드","slide"],mimeRe:/presentationml|ms-powerpoint/i},
+ {name:"hwp",primaryExt:"hwp",extRe:/\.hwpx?(?:$|[?#])/i,magic:b=>isOleContainer(b)||isZipContainer(b),aliases:["한글파일","hwp","hwpx"],mimeRe:/hwp/i},
+ {name:"zip",primaryExt:"zip",extRe:/\.(?:zip|7z|rar)(?:$|[?#])/i,magic:b=>isZipContainer(b)||b.subarray(0,4).toString("hex")==="52617221"||b.subarray(0,2).toString("hex")==="377a",aliases:["압축","압축파일","zip","알집"],mimeRe:/\bzip\b|x-rar|7z-compressed|x-compress/i},
  {name:"image",primaryExt:"png",extRe:/\.(?:png|jpe?g|gif|webp)(?:$|[?#])/i,magic:b=>{
   const hex=b.subarray(0,4).toString("hex");
   return hex.startsWith("89504e47")||hex.startsWith("ffd8")||hex.startsWith("47494638")||b.subarray(8,12).toString()==="WEBP";
- },aliases:["이미지","사진","image","png","jpg","jpeg"]},
- {name:"csv",primaryExt:"csv",extRe:/\.csv(?:$|[?#])/i,magic:()=>true,aliases:["csv"]}, // plain text, no reliable magic bytes
+ },aliases:["이미지","사진","image","png","jpg","jpeg"],mimeRe:/^image\//i},
+ {name:"csv",primaryExt:"csv",extRe:/\.csv(?:$|[?#])/i,magic:b=>!/^\s*<(!doctype|html)/i.test(b.subarray(0,100).toString("utf8")),aliases:["csv"],mimeRe:/\bcsv\b/i}, // plain text has no reliable signature, but reject the obvious false-positive case (an HTML error/login page saved where a CSV was expected)
 ];
 // A wildcard policy for when the instruction doesn't name any specific format: rather than
 // silently assuming PDF (or any other single type), match against every known extension, and
-// verify against every known REAL signature. csv is excluded from the magic check since it has
-// no reliable binary signature (magic always returns true) and would make the wildcard check
-// meaningless if included.
+// verify against every known REAL signature. csv is excluded from the wildcard's magic check
+// since its own check (reject obvious HTML, accept everything else) is far weaker than the
+// others' actual binary signatures and would let too much through if it were included here -
+// it still applies its own check when csv is explicitly requested by name, just not as a
+// fallback for arbitrary unnamed downloads.
 const VERIFIABLE_TYPES=FILE_TYPES.filter(t=>t.name!=="csv");
 export const ANY_FILE_TYPE:FileType={
  name:"any",
  primaryExt:"",
  extRe:new RegExp(FILE_TYPES.map(t=>t.extRe.source).join("|"),"i"),
  magic:b=>VERIFIABLE_TYPES.some(t=>t.magic(b)),
- aliases:[]
+ aliases:[],
+ mimeRe:/(?!)/ // never matches - extension inference for downloads always uses FILE_TYPES directly, not this wildcard
 };
 
 // Pick the target file type from what the instruction actually asks for. When nothing specific

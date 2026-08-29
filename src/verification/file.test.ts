@@ -84,3 +84,28 @@ test("verify() fails for an empty file", async () => {
 test("verify() rejects (does not silently succeed) for a missing file", async () => {
  await assert.rejects(()=>verify("/nonexistent/path/does-not-exist.pdf"));
 });
+
+test("verify() recognizes a real RAR file by its magic bytes (regression: byte-length mismatch previously made this always fail)", async () => {
+ const ZIP=FILE_TYPES.find(t=>t.name==="zip")!;
+ const rarSignature=Buffer.from([0x52,0x61,0x72,0x21,0x1a,0x07,0x00]); // "Rar!" + trailer
+ await withTempFile("archive.rar",rarSignature,async(filePath)=>{
+  const result=await verify(filePath,ZIP);
+  assert.equal(result.ok,true);
+ });
+});
+
+test("verify() with the csv policy rejects an HTML page saved as .csv (same false-positive class as the original PDF bug)", async () => {
+ const CSV=FILE_TYPES.find(t=>t.name==="csv")!;
+ await withTempFile("fake.csv",Buffer.from("<!DOCTYPE html><html>login required</html>"),async(filePath)=>{
+  const result=await verify(filePath,CSV);
+  assert.equal(result.ok,false);
+ });
+});
+
+test("verify() with the csv policy accepts genuine delimited text content", async () => {
+ const CSV=FILE_TYPES.find(t=>t.name==="csv")!;
+ await withTempFile("real.csv",Buffer.from("name,age\nAlice,30\nBob,25\n"),async(filePath)=>{
+  const result=await verify(filePath,CSV);
+  assert.equal(result.ok,true);
+ });
+});

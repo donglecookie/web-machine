@@ -9,10 +9,14 @@ function safeName(name:string):string{
 }
 
 // If the URL itself had no usable extension, fall back to content-type sniffing across every
-// known file type rather than assuming PDF specifically.
-function inferExtension(contentType:string):string{
+// known file type. Real-world MIME types often don't contain the extension/name as a literal
+// substring (e.g. xlsx is "...spreadsheetml.sheet"), so match against each type's dedicated
+// mimeRe pattern first; only fall back to loose name/extension substring matching if nothing
+// matched (covers unlisted or unusually-formatted content-type values).
+export function inferExtension(contentType:string):string{
  const ct=contentType.toLowerCase();
- const match=FILE_TYPES.find(t=>ct.includes(t.name)||ct.includes(t.primaryExt));
+ const match=FILE_TYPES.find(t=>t.mimeRe.test(ct))
+  ||FILE_TYPES.find(t=>ct.includes(t.name)||ct.includes(t.primaryExt));
  return match?`.${match.primaryExt}`:"";
 }
 
