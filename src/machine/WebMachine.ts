@@ -1,4 +1,4 @@
-import {resolve,newBudget,Budget} from "../files/resolver.js";import {download} from "../files/download.js";import {verify} from "../verification/file.js";import {HtmlMachine} from "./HtmlMachine.js";import {relevanceRatio} from "../discovery/patterns.js";
+import {resolve,newBudget,Budget} from "../files/resolver.js";import {download} from "../files/download.js";import {verify} from "../verification/file.js";import {HtmlMachine} from "./HtmlMachine.js";import {relevanceRatio,detectFileType} from "../discovery/patterns.js";
 const BLOCKED_DOMAINS=[
  "googlesyndication.com","doubleclick.net","google-analytics.com","googletagmanager.com",
  "adtrafficquality.google","fundingchoicesmessages.google.com","googleadservices.com",
@@ -33,17 +33,18 @@ export class WebMachine{
    catch(e){if(attempt===1)throw e;}
   }
  }
- private async downloadAndVerify(url:string,history:any[]){
-  try{const file=await download(url);const verification=await verify(file.path);return{ok:verification.ok,url:file.url,path:file.path,verification,history};}
+ private async downloadAndVerify(url:string,history:any[],fileType:ReturnType<typeof detectFileType>){
+  try{const file=await download(url);const verification=await verify(file.path,fileType);return{ok:verification.ok,url:file.url,path:file.path,verification,history};}
   catch(e){return{ok:false,url,message:e instanceof Error?e.message:String(e),history};}
  }
  async fetch(instruction:string,maxSteps=8,budget:Budget=newBudget()){
+  const fileType=detectFileType(instruction);
   // Fast path: check the raw HTML of the current page for an obvious direct file link
   // before spinning up the full browser-driven resolve() loop.
   const currentUrl=this.page?await this.page.url().catch(()=>null):null;
   if(currentUrl&&currentUrl!=="about:blank"){
-   const direct=await this.html.findDirectFile(currentUrl).catch(()=>null);
-   if(direct)return withRelevanceCheck(await this.downloadAndVerify(direct,[{url:currentUrl,action:{kind:"html-direct",url:direct}}]),instruction);
+   const direct=await this.html.findDirectFile(currentUrl,fileType).catch(()=>null);
+   if(direct)return withRelevanceCheck(await this.downloadAndVerify(direct,[{url:currentUrl,action:{kind:"html-direct",url:direct}}],fileType),instruction);
   }
 
   let found:any;
@@ -51,12 +52,12 @@ export class WebMachine{
   catch(e){return{ok:false,message:`resolve failed: ${e instanceof Error?e.message:String(e)}`,history:[]};}
   if(found.downloadedFile){
    try{
-    const verification=await verify(found.downloadedFile);
+    const verification=await verify(found.downloadedFile,fileType);
     return withRelevanceCheck({ok:verification.ok,path:found.downloadedFile,verification,history:found.history},instruction);
    }catch(e){return{ok:false,message:e instanceof Error?e.message:String(e),history:found.history};}
   }
   if(!found.ok||!found.url)return{ok:false,message:"No file URL found.",history:found.history};
-  return withRelevanceCheck(await this.downloadAndVerify(found.url,found.history),instruction);
+  return withRelevanceCheck(await this.downloadAndVerify(found.url,found.history,fileType),instruction);
  }
  async close(){
   try{await this.stagehand.close();}

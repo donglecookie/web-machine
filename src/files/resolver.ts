@@ -1,5 +1,5 @@
 import {inspect,Candidate} from "../discovery/dom.js";
-import {KEYWORD_RE,sameHost,resolvePdfUrl,tokenize,relevanceRatioTokens} from "../discovery/patterns.js";
+import {KEYWORD_RE,sameHost,resolveFileUrl,tokenize,relevanceRatioTokens,detectFileType,FileType} from "../discovery/patterns.js";
 import {readdir} from "node:fs/promises";
 
 // Strategy order (most general/common first, most site-specific last):
@@ -92,6 +92,7 @@ async function syncActivePage(stagehand:any,current:any):Promise<any>{
 export async function resolve(stagehand:any,page:any,instruction:string,maxSteps=8,budget:Budget=newBudget()){
  const history:any[]=[];
  let budgetWarned=false;
+ const fileType:FileType=detectFileType(instruction);
  // observe() already grounds a concrete selector, so execute it directly via the
  // Playwright-style Locator API (no LLM call) instead of re-asking the model what to do.
  // Only fall back to the LLM-driven act() (which re-reasons and self-heals) if the direct
@@ -110,13 +111,13 @@ export async function resolve(stagehand:any,page:any,instruction:string,maxSteps
 
  for(let i=0;i<maxSteps;i++){
   const url=await page.url().catch(()=>history[history.length-1]?.url||"");
-  const resolvedCurrentUrl=resolvePdfUrl(url);
+  const resolvedCurrentUrl=resolveFileUrl(url,fileType);
   if(resolvedCurrentUrl)return{ok:true,url:resolvedCurrentUrl,history};
 
-  const candidates=await inspect(page).catch(()=>[]);
-  const direct=candidates.find(c=>c.url&&resolvePdfUrl(c.url))
+  const candidates=await inspect(page,fileType).catch(()=>[]);
+  const direct=candidates.find(c=>c.url&&resolveFileUrl(c.url,fileType))
    ||candidates.find(c=>c.url&&sameHost(c.url,url)&&!isSamePageHash(c.url,url)&&KEYWORD_RE.test(c.text));
-  if(direct?.url){const resolvedUrl=resolvePdfUrl(direct.url)||direct.url;history.push({url,action:direct});return{ok:true,url:resolvedUrl,history};}
+  if(direct?.url){const resolvedUrl=resolveFileUrl(direct.url,fileType)||direct.url;history.push({url,action:direct});return{ok:true,url:resolvedUrl,history};}
 
   // Exclude already-clicked selectors from the candidate text we show the LLM, and enforce
   // it as a hard constraint in the mechanical fallback below. Note this is not an absolute
@@ -198,7 +199,7 @@ Never pick actions that log out, delete, purchase, subscribe, or otherwise make 
    const downloadedFile=await newDownloadedFile(beforeFiles);
    if(downloadedFile)return{ok:true,downloadedFile,history};
    const postClickUrl=await page.url().catch(()=>"");
-   const resolvedPostClickUrl=resolvePdfUrl(postClickUrl);
+   const resolvedPostClickUrl=resolveFileUrl(postClickUrl,fileType);
    if(resolvedPostClickUrl)return{ok:true,url:resolvedPostClickUrl,history};
   }
 

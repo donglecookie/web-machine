@@ -1,14 +1,9 @@
 import {test} from "node:test";
 import assert from "node:assert/strict";
-import {FILE_RE,KEYWORD_RE,sameHost,resolvePdfUrl,tokenize,relevanceRatioTokens,relevanceRatio} from "./patterns.js";
+import {KEYWORD_RE,sameHost,resolveFileUrl,tokenize,relevanceRatioTokens,relevanceRatio,detectFileType,FILE_TYPES} from "./patterns.js";
 
-test("FILE_RE matches .pdf urls with query/hash/end", () => {
- assert.ok(FILE_RE.test("https://x.com/a.pdf"));
- assert.ok(FILE_RE.test("https://x.com/a.pdf?x=1"));
- assert.ok(FILE_RE.test("https://x.com/a.pdf#page=2"));
- assert.ok(!FILE_RE.test("https://x.com/a.pdfx"));
- assert.ok(!FILE_RE.test("https://x.com/a.html"));
-});
+const PDF=FILE_TYPES.find(t=>t.name==="pdf")!;
+const XLSX=FILE_TYPES.find(t=>t.name==="xlsx")!;
 
 test("KEYWORD_RE matches common download/file keywords, Korean and English", () => {
  assert.ok(KEYWORD_RE.test("다운로드"));
@@ -23,18 +18,35 @@ test("sameHost compares hostnames only, ignoring path/protocol quirks", () => {
  assert.ok(!sameHost("not a url","https://a.com/x"));
 });
 
-test("resolvePdfUrl returns the url itself when it already ends in .pdf", () => {
- assert.equal(resolvePdfUrl("https://a.com/doc.pdf"),"https://a.com/doc.pdf");
+test("detectFileType picks the type named in the instruction (not always PDF)", () => {
+ assert.equal(detectFileType("2025년 예산안 엑셀 파일 받아줘").name,"xlsx");
+ assert.equal(detectFileType("발표자료 파워포인트 찾아줘").name,"pptx");
+ assert.equal(detectFileType("압축파일로 된 소스코드").name,"zip");
+ assert.equal(detectFileType("이미지 다운로드").name,"image");
 });
 
-test("resolvePdfUrl unwraps a pdf hidden in a query parameter (PDF.js-style viewer)", () => {
+test("detectFileType defaults to pdf when no specific type is named", () => {
+ assert.equal(detectFileType("2025학년도 9월 모의평가 사회문화").name,"pdf");
+});
+
+test("resolveFileUrl (pdf) returns the url itself when it already ends in .pdf", () => {
+ assert.equal(resolveFileUrl("https://a.com/doc.pdf",PDF),"https://a.com/doc.pdf");
+ assert.ok(!resolveFileUrl("https://a.com/doc.pdf",XLSX)); // wrong type for the requested policy
+});
+
+test("resolveFileUrl (xlsx) matches .xlsx/.xls urls the same way", () => {
+ assert.equal(resolveFileUrl("https://a.com/budget.xlsx",XLSX),"https://a.com/budget.xlsx");
+ assert.equal(resolveFileUrl("https://a.com/budget.xls",XLSX),"https://a.com/budget.xls");
+});
+
+test("resolveFileUrl unwraps a file url hidden in a query parameter (viewer-style wrapper)", () => {
  const wrapped="https://a.com/viewer.html?file="+encodeURIComponent("https://cdn.a.com/real.pdf")+"&x=1";
- assert.equal(resolvePdfUrl(wrapped),"https://cdn.a.com/real.pdf");
+ assert.equal(resolveFileUrl(wrapped,PDF),"https://cdn.a.com/real.pdf");
 });
 
-test("resolvePdfUrl returns null when no .pdf is found anywhere", () => {
- assert.equal(resolvePdfUrl("https://a.com/viewer.html?file=https%3A%2F%2Fa.com%2Fdoc.html"),null);
- assert.equal(resolvePdfUrl("not a url at all"),null);
+test("resolveFileUrl returns null when no matching file is found anywhere", () => {
+ assert.equal(resolveFileUrl("https://a.com/viewer.html?file=https%3A%2F%2Fa.com%2Fdoc.html",PDF),null);
+ assert.equal(resolveFileUrl("not a url at all",PDF),null);
 });
 
 test("tokenize splits on whitespace/punctuation and drops single-character tokens", () => {

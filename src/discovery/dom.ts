@@ -1,4 +1,5 @@
-import {FILE_RE} from "./patterns.js";
+import {KEYWORD_RE,FileType,FILE_TYPES} from "./patterns.js";
+const DEFAULT_FILE_TYPE=FILE_TYPES[0];
 export type Candidate={kind:string;text:string;url?:string;selector?:string;score:number;nav:boolean};
 const EVAL_SOURCE=`(() => {
   const a = [];
@@ -43,9 +44,13 @@ const EVAL_SOURCE=`(() => {
   return a;
 })()`;
 const MAX_CANDIDATES=60;
-export async function inspect(page:any):Promise<Candidate[]>{
+export async function inspect(page:any,fileType:FileType=DEFAULT_FILE_TYPE):Promise<Candidate[]>{
  const xs=await page.evaluate(EVAL_SOURCE);
- const scored=xs.map((x:any)=>{const s=x.text.toLowerCase();let score=0;if(/pdf|첨부|다운로드|download|문제|사회문화|사회·문화|파일|attachment/.test(s))score+=60;if(x.kind==="download")score+=40;if(FILE_RE.test(x.url||""))score+=100;return{...x,score};});
+ // This is a coarse initial ranking only - genuine relevance-to-instruction ranking happens
+ // later via relevanceRatio in resolver.ts. Here we just want a reasonable starting order and
+ // a signal for the zero-LLM mechanical fallback, so the boost stays generic (download intent
+ // + the requested file type's own extension), not tied to any particular site or subject.
+ const scored=xs.map((x:any)=>{const s=x.text.toLowerCase();let score=0;if(KEYWORD_RE.test(s)||fileType.aliases.some(a=>s.includes(a.toLowerCase())))score+=60;if(x.kind==="download")score+=40;if(fileType.extRe.test(x.url||""))score+=100;return{...x,score};});
  const seen=new Set<string>();
  // Include the selector in the de-dup key: several genuinely distinct elements (e.g. three
  // separate "다운로드" buttons under different tabs) can share identical text/kind/url, and
