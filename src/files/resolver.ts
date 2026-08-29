@@ -13,7 +13,7 @@ import {readdir} from "node:fs/promises";
 
 const CALL_TIMEOUT=60000;
 const TOP_N_NAV=4;
-const TOP_N_BUTTON=15;
+const TOP_N_BUTTON=30;
 const TOP_N_LINK=5;
 const RECAP_STEPS=8;
 const DOWNLOADS_DIR="downloads";
