@@ -14,15 +14,15 @@ import {readdir} from "node:fs/promises";
 const CALL_TIMEOUT=60000;
 const TOP_N_NAV=4;
 const TOP_N_BUTTON=30;
-const TOP_N_LINK=5;
+const TOP_N_LINK=15;
 const RECAP_STEPS=8;
 const DOWNLOADS_DIR="downloads";
 
 // Buttons (filters, tabs, selectors) are typically a finite, small set where missing even one
 // option (e.g. a subject filter among many) can silently steer the whole flow to the wrong
-// result. Content links (exam listings, articles) can be numerous and are fine to truncate
-// more aggressively - so they get separate, unequal budgets rather than competing for the
-// same slots.
+// result. Content links (exam listings, articles) can also legitimately number in the dozens
+// on a results page (e.g. one entry per sub-subject under a category), so both get generous,
+// separate budgets rather than competing for the same handful of slots.
 function summarize(candidates:Candidate[]):string{
  const nav=candidates.filter(c=>c.nav).slice(0,TOP_N_NAV);
  const buttons=candidates.filter(c=>!c.nav&&c.kind==="button").slice(0,TOP_N_BUTTON);
