@@ -33,6 +33,17 @@ STAGEHAND_MODEL=openai/gpt-4o-mini
 STAGEHAND_MODEL=anthropic/claude-sonnet-4-6
 ```
 
+### OpenRouter(또는 다른 OpenAI 호환 엔드포인트) 사용
+
+Stagehand는 OpenRouter를 네이티브로 지원하지 않아서(허용된 프로바이더는 openai/anthropic/google/groq/cerebras뿐), `src/runtime/openaiCompatibleClient.ts`가 Stagehand의 내부 메시지 프로토콜(Anthropic/MCP 스타일 콘텐츠 블록)과 OpenAI 호환 프로토콜(평문 `content` + 별도 `tool_calls`) 사이를 통역하는 어댑터 역할을 합니다. `.env`에 다음을 설정하면 됩니다(설정 시 `STAGEHAND_MODEL`/`GROQ_API_KEY`보다 우선 적용):
+
+```
+OPENROUTER_API_KEY=your_openrouter_api_key
+OPENROUTER_MODEL=openai/gpt-4o-mini
+```
+
+이 어댑터는 OpenRouter뿐 아니라 OpenAI 호환 API를 제공하는 어떤 엔드포인트와도 동작합니다(`createOpenAICompatibleClient({apiKey, model, baseURL})`의 `baseURL`을 바꾸면 됩니다).
+
 ## 탐색 전략
 
 시작 사이트가 없으면(`TEST_URL` 미지정), 먼저 자체 검색 레이어(`src/discovery/websearch.ts`)로 후보 사이트를 찾아 순서대로 시도합니다 (`src/discover.ts`). 검색은 브라우저/LLM 없이 순수 HTTP로 Bing → Google을 먼저 시도하고(빠르고 무료), 둘 다 결과가 없을 때만 브라우저 + LLM(`stagehand.extract()`)으로 검색 결과 페이지를 의미적으로 읽어내는 방식으로 폴백합니다. 사이트 방문은 목적이 아니라 원하는 콘텐츠를 얻기 위한 수단이므로, 한 후보 사이트에서 실패하면 다음 후보로 넘어갑니다.
