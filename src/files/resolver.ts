@@ -135,15 +135,15 @@ export async function resolve(stagehand:any,page:any,instruction:string,maxSteps
     budget.llmCalls++;
     const obs=await stagehand.observe(`Goal: find "${instruction}".
 
-Prior actions this session (most recent last; the elements below are already excluded from the candidate list so you can't pick them again):
+Prior actions this session (most recent last; the elements below are already excluded from the candidate list so you can't pick them again). Use this to judge whether a filter flow is still in progress:
 ${recap(history)}
 
 Page candidates:
 ${summarize(freshCandidates,instruction)}
 
 Next action:
-- Exact file link/button above (or elsewhere on page) -> pick it.
-- Mid multi-step filter flow -> pick next unset filter, then submit.
+- If any filters were already set in prior actions above (a category/date/etc. was picked, most recent last) but no search/submit button has been clicked yet, that flow is INCOMPLETE - pick the next unset filter, or the submit/search button, even if a matching-looking result link is also visible. A link that only coincidentally shares words with the goal (e.g. from a "popular/featured" list, not the actual filtered results) can be the wrong item entirely - finishing and submitting the filters first gets the genuinely matching result.
+- Exact file link/button above (or elsewhere on page) -> pick it, once no filter flow is left incomplete.
 - Already-clicked submit/search with no new results -> find an actual result link instead.
 - Site search box visible and likely faster -> use it.
 - Else -> most specific relevant nav (category/date/article), not generic links.
