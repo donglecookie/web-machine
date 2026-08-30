@@ -125,7 +125,19 @@ export async function resolve(stagehand:any,page:any,instruction:string,maxSteps
   // hints, so it can in principle still name an already-clicked element - which is exactly
   // why the stuck-loop check further down remains a necessary second line of defense.
   const clicked=new Set(history.map(h=>h.action?.selector).filter(Boolean));
-  const freshCandidates=candidates.filter(c=>!(c.selector&&clicked.has(c.selector)));
+  let freshCandidates=candidates.filter(c=>!(c.selector&&clicked.has(c.selector)));
+
+  // A prose instruction alone ("finish the filter flow before clicking a result link") isn't
+  // reliable - LLMs sometimes ignore it and grab a keyword-matching-but-wrong-date link from
+  // an unrelated "popular/featured" list anyway (seen repeatedly in practice). If some
+  // non-nav button was already clicked (a filter/category pick) but nothing matching
+  // search/submit intent has happened yet, hide link-kind candidates entirely so an
+  // in-progress filter flow can't be short-circuited by a tempting-looking link - only the
+  // remaining filter buttons and the eventual submit button stay selectable.
+  const submitLikeRe=/검색|찾기|search|submit|필터/i;
+  const hasPickedFilter=history.some(h=>h.action?.kind==="button"&&!h.action?.nav&&!submitLikeRe.test(h.action?.text||""));
+  const hasSubmitted=history.some(h=>submitLikeRe.test(h.action?.text||""));
+  if(hasPickedFilter&&!hasSubmitted)freshCandidates=freshCandidates.filter(c=>c.kind!=="link");
 
   const beforeFiles=await snapshotDownloads();
   let acted=false;
@@ -154,7 +166,8 @@ Never pick actions that log out, delete, purchase, subscribe, or otherwise make 
     if(next?.selector&&await click(next.selector,`Click "${next.description}".`)){
      selector=next.selector;
      actionText=next.description||"";
-     history.push({url,action:{kind:"observe",text:next.description,selector:next.selector}});
+     const matched=candidates.find(c=>c.selector===next.selector);
+     history.push({url,action:{kind:matched?.kind||"observe",text:next.description,selector:next.selector,nav:matched?.nav}});
      if(/search|검색/i.test(next.description)){
       await page.waitForTimeout(300);
       await act(`Type "${instruction}" into the search input field and press Enter to submit the search.`);
