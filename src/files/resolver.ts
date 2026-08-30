@@ -147,6 +147,7 @@ Next action:
 - Already-clicked submit/search with no new results -> find an actual result link instead.
 - Site search box visible and likely faster -> use it.
 - Else -> most specific relevant nav (category/date/article), not generic links.
+Only pick a genuinely clickable, interactive element (a real button or link) - never pick a heading, title, label, or other plain descriptive text just because it names the right thing; find the actual button/link near it instead.
 Never pick actions that log out, delete, purchase, subscribe, or otherwise make an irreversible/account-affecting change - only read/navigate/search actions.`,{page,timeout:CALL_TIMEOUT});
     const next=obs?.data?.[0];
     if(next?.selector&&await click(next.selector,`Click "${next.description}".`)){
