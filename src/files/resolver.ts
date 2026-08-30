@@ -130,6 +130,7 @@ export async function resolve(stagehand:any,page:any,instruction:string,maxSteps
   const beforeFiles=await snapshotDownloads();
   let acted=false;
   let selector:string|undefined;
+  let actionText="";
   if(budget.llmCalls<budget.maxLlmCalls){
    try{
     budget.llmCalls++;
@@ -152,6 +153,7 @@ Never pick actions that log out, delete, purchase, subscribe, or otherwise make 
     const next=obs?.data?.[0];
     if(next?.selector&&await click(next.selector,`Click "${next.description}".`)){
      selector=next.selector;
+     actionText=next.description||"";
      history.push({url,action:{kind:"observe",text:next.description,selector:next.selector}});
      if(/search|검색/i.test(next.description)){
       await page.waitForTimeout(300);
@@ -175,6 +177,7 @@ Never pick actions that log out, delete, purchase, subscribe, or otherwise make 
     ||freshCandidates.find(c=>c.kind==="button"||c.kind==="link");
    if(!action)break;
    selector=action.selector;
+   actionText=action.text||"";
    history.push({url,action});
    const ok=action.selector
     ?await clickFast(action.selector)
@@ -195,13 +198,18 @@ Never pick actions that log out, delete, purchase, subscribe, or otherwise make 
   }
 
   if(acted){
-   await page.waitForTimeout(3000);
+   // File-serving actions (a matched download/get/view button) can take longer to actually
+   // produce a file/render a viewer than an ordinary navigation click - give those extra time
+   // before concluding nothing happened, rather than a flat wait for every kind of click.
+   const waitMs=KEYWORD_RE.test(actionText)?5000:1200;
+   await page.waitForTimeout(waitMs);
    page=await syncActivePage(stagehand,page);
    const downloadedFile=await newDownloadedFile(beforeFiles);
    if(downloadedFile)return{ok:true,downloadedFile,history};
    const postClickUrl=await page.url().catch(()=>"");
    const resolvedPostClickUrl=resolveFileUrl(postClickUrl,fileType);
    if(resolvedPostClickUrl)return{ok:true,url:resolvedPostClickUrl,history};
+   if(KEYWORD_RE.test(actionText))console.error(`resolve: clicked a download-intent element ("${actionText}") but no file/URL change detected after ${waitMs}ms`);
   }
 
   await page.waitForTimeout(500);
