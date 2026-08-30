@@ -209,7 +209,7 @@ Never pick actions that log out, delete, purchase, subscribe, or otherwise make 
    const postClickUrl=await page.url().catch(()=>"");
    const resolvedPostClickUrl=resolveFileUrl(postClickUrl,fileType);
    if(resolvedPostClickUrl)return{ok:true,url:resolvedPostClickUrl,history};
-   if(KEYWORD_RE.test(actionText))console.error(`resolve: clicked a download-intent element ("${actionText}") but no file/URL change detected after ${waitMs}ms`);
+   if(KEYWORD_RE.test(actionText))console.error(`resolve: after clicking "${actionText}", current URL is: ${postClickUrl} (unchanged from before: ${postClickUrl===url})`);
   }
 
   await page.waitForTimeout(500);
