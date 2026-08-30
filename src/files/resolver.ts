@@ -198,11 +198,7 @@ Never pick actions that log out, delete, purchase, subscribe, or otherwise make 
   }
 
   if(acted){
-   // File-serving actions (a matched download/get/view button) can take longer to actually
-   // produce a file/render a viewer than an ordinary navigation click - give those extra time
-   // before concluding nothing happened, rather than a flat wait for every kind of click.
-   const waitMs=KEYWORD_RE.test(actionText)?5000:1200;
-   await page.waitForTimeout(waitMs);
+   await page.waitForTimeout(3000);
    page=await syncActivePage(stagehand,page);
    const downloadedFile=await newDownloadedFile(beforeFiles);
    if(downloadedFile)return{ok:true,downloadedFile,history};
