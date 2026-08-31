@@ -1,6 +1,6 @@
 import {test} from "node:test";
 import assert from "node:assert/strict";
-import {KEYWORD_RE,sameHost,resolveFileUrl,tokenize,relevanceRatioTokens,relevanceRatio,detectFileType,FILE_TYPES} from "./patterns.js";
+import {KEYWORD_RE,SUBMIT_INTENT_RE,sameHost,resolveFileUrl,tokenize,relevanceRatioTokens,relevanceRatio,detectFileType,FILE_TYPES} from "./patterns.js";
 
 const PDF=FILE_TYPES.find(t=>t.name==="pdf")!;
 const XLSX=FILE_TYPES.find(t=>t.name==="xlsx")!;
@@ -67,6 +67,17 @@ test("relevanceRatio (convenience wrapper) matches relevanceRatioTokens for the 
  const instruction="2025학년도 9월 모의평가 사회문화";
  const text="2025년 고3 9월 모평(평가원) 사회문화_문제지.pdf";
  assert.equal(relevanceRatio(text,instruction),relevanceRatioTokens(text,tokenize(instruction)));
+});
+
+test("SUBMIT_INTENT_RE matches genuine search/submit button text", () => {
+ assert.ok(SUBMIT_INTENT_RE.test("검색"));
+ assert.ok(SUBMIT_INTENT_RE.test("모의고사 찾기"));
+ assert.ok(SUBMIT_INTENT_RE.test("Search"));
+});
+
+test("SUBMIT_INTENT_RE does NOT match a filter-reset button (regression: '필터' was removed after a real 'clear all filters' button falsely counted as submitted)", () => {
+ assert.ok(!SUBMIT_INTENT_RE.test("선택된 필터 모두 지우기"));
+ assert.ok(!SUBMIT_INTENT_RE.test("상세 조건"));
 });
 
 test("relevanceRatio treats an instruction with no meaningful tokens as fully relevant", () => {

@@ -6,6 +6,13 @@ export function sameHost(a:string,b:string):boolean{
 // signal that a link/button is meant to hand over a file at all.
 export const KEYWORD_RE=/download|attachment|첨부|다운로드|받기|저장/i;
 
+// Distinct from KEYWORD_RE (download intent): this specifically detects "submit/search"
+// intent, used to judge whether a multi-step filter flow has actually been submitted yet.
+// Deliberately narrow - e.g. "필터" ("filter") was tried here once and had to be removed: a
+// real "선택된 필터 모두 지우기" (clear all filters) button contains that word too, which would
+// have falsely counted as "submitted" the moment that reset button's text was recorded.
+export const SUBMIT_INTENT_RE=/검색|찾기|search|submit/i;
+
 // A ZIP-container signature (PK\x03\x04 or the empty/spanned variants) covers xlsx/docx/pptx
 // (which are all ZIP archives internally) as well as plain .zip files.
 function isZipContainer(b:Buffer):boolean{
