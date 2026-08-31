@@ -237,7 +237,18 @@ Never pick actions that log out, delete, purchase, subscribe, or otherwise make 
      rejectedPicks.push(nextText);
      console.error(`resolve: rejected observe() pick "${next.description}" - it ${reason}; falling back to mechanical selection.`);
     }
-   }catch(e){console.error("observe step failed:",e instanceof Error?e.message:String(e));}
+   }catch(e){
+    const msg=e instanceof Error?e.message:String(e);
+    console.error("observe step failed:",msg);
+    // A payment/credits error (e.g. an exhausted OpenRouter balance) will fail identically on
+    // every subsequent call too - retrying wastes the rest of the step budget on calls that
+    // are certain to fail. Treat it like budget exhaustion: stop attempting the LLM path for
+    // the remainder of this run and rely on the free mechanical fallback instead.
+    if(/\b402\b|insufficient.*credit|requires more credits|payment required/i.test(msg)){
+     budget.llmCalls=budget.maxLlmCalls;
+     if(!budgetWarned){console.error("resolve: LLM provider rejected the request for insufficient credits - continuing with free heuristic clicks only.");budgetWarned=true;}
+    }
+   }
   }else if(!budgetWarned){
    console.error(`resolve: LLM call budget exhausted (${budget.maxLlmCalls}) - continuing with free heuristic clicks only.`);
    budgetWarned=true;
