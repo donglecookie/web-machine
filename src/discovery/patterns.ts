@@ -17,7 +17,14 @@ export const SUBMIT_INTENT_RE=/검색|찾기|search|submit/i;
 // in this project's forward-progressing flow (select filters -> submit -> open result) where
 // clicking one helps. Excluded from candidates entirely (not just the LLM prompt) so the
 // judgment-free mechanical fallback can't grab one either.
-export const RESET_INTENT_RE=/초기화|필터.*지우기|지우기.*필터|clear all|reset/i;
+// Actions that can never help reach the goal, regardless of filter-flow state: undoing
+// progress (reset/clear/back) or side-channel actions with no bearing on finding a file
+// (copy link, share). Seen in practice: the mechanical fallback grabbed a "뒤로 가기" (go
+// back) button after correctly reaching the target page, undoing that progress, and later
+// wasted two picks on "링크 복사"/"공유하기" (copy link/share) - clipboard actions that could
+// never lead to a download. Excluded from candidates entirely (not just the LLM prompt) so
+// the judgment-free mechanical fallback can't grab any of these either.
+export const RESET_INTENT_RE=/초기화|필터.*지우기|지우기.*필터|clear all|reset|뒤로\s*가기|뒤로가기|이전\s*(페이지|화면)|go\s*back|링크\s*복사|공유하기|copy\s*link|\bshare\b/i;
 
 // Structural backstop for the "never log out/delete/purchase/subscribe" prompt instruction -
 // prose alone has repeatedly proven insufficient in this codebase (the model has ignored

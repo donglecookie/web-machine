@@ -86,6 +86,13 @@ test("RESET_INTENT_RE matches filter-reset buttons (regression: mechanical fallb
  assert.ok(RESET_INTENT_RE.test("Clear all filters"));
 });
 
+test("RESET_INTENT_RE matches 'go back' and clipboard-only actions (regression: mechanical fallback undid progress by clicking '뒤로 가기' after reaching the correct exam page, then wasted picks on '링크 복사'/'공유하기')", () => {
+ assert.ok(RESET_INTENT_RE.test("2025년 고3 9월 모평(평가원) 사회·문화 뒤로 가기"));
+ assert.ok(RESET_INTENT_RE.test("2025년 고3 9월 모평(평가원) 사회·문화 링크 복사"));
+ assert.ok(RESET_INTENT_RE.test("2025년 고3 9월 모평(평가원) 사회·문화 공유하기"));
+ assert.ok(RESET_INTENT_RE.test("Go back"));
+});
+
 test("RESET_INTENT_RE does not match unrelated buttons, including a benign 'clear search text' action", () => {
  assert.ok(!RESET_INTENT_RE.test("검색어 지우기")); // clears only the search box text, not filters - harmless
  assert.ok(!RESET_INTENT_RE.test("검색"));
