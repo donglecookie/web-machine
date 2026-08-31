@@ -60,7 +60,15 @@ test("tokenize splits on whitespace/punctuation and drops single-character token
 test("relevanceRatioTokens scores fraction of instruction tokens found in the text", () => {
  const tokens=tokenize("2025학년도 9월 모의평가 사회문화");
  assert.equal(relevanceRatioTokens("2025년 고3 9월 모평(평가원) 사회문화_문제지.pdf",tokens)>=0.5,true);
- assert.equal(relevanceRatioTokens("2025년 고3 9월 모평(평가원) 한문Ⅰ_문제지.pdf",tokens)<0.5,true);
+ // Wrong subject AND wrong year/month - relevance should be near zero, not just "less than the exact match"
+ assert.equal(relevanceRatioTokens("2023년 고3 6월 모평(평가원) 한문Ⅰ_문제지.pdf",tokens)<0.5,true);
+});
+
+test("relevanceRatioTokens matches a 4-digit year regardless of Korean suffix (regression: '2025학년도' in the instruction failed to match a '2025년' filter button due to the different suffix, so all year buttons tied at zero relevance and the fallback clicked through them in raw order, overwriting the correct one)", () => {
+ const tokens=tokenize("2025학년도 9월 모의평가 사회문화");
+ assert.ok(relevanceRatioTokens("2025년",tokens)>0);
+ assert.equal(relevanceRatioTokens("2025년",tokens),relevanceRatioTokens("2025학년도",tokens));
+ assert.equal(relevanceRatioTokens("2024년",tokens),0); // a different year must not accidentally match
 });
 
 test("relevanceRatioTokens matches through a middle dot in the candidate text (regression: '사회문화' in the instruction failed to match '사회·문화' as actually written on real sites, silently under-scoring relevance all session)", () => {

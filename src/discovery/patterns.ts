@@ -135,7 +135,19 @@ function stripMiddleDot(s:string):string{
 export function relevanceRatioTokens(text:string,tokens:string[]):number{
  if(!tokens.length)return 1;
  const t=stripMiddleDot(text.toLowerCase());
- return tokens.filter(tok=>t.includes(tok)).length/tokens.length;
+ const matched=tokens.filter(tok=>{
+  if(t.includes(tok))return true;
+  // A 4-digit year is often written with a different suffix depending on context - an
+  // instruction's "2025학년도" (school year) won't literally match a filter button labeled
+  // "2025년" (calendar year) even though they refer to the same year. Extracting the bare
+  // digits and comparing those directly avoids depending on which suffix either side used.
+  // Seen in practice: with no such fallback, ALL year buttons (2024/2025/2026...) tied at
+  // zero relevance, so the fallback had no signal for which one was actually correct and
+  // clicked through them in raw order - including overwriting the right one.
+  const year=tok.match(/(19|20)\d{2}/)?.[0];
+  return Boolean(year&&t.includes(year));
+ });
+ return matched.length/tokens.length;
 }
 export function relevanceRatio(text:string,instruction:string):number{
  return relevanceRatioTokens(text,tokenize(instruction));
