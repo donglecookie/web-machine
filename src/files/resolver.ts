@@ -220,10 +220,17 @@ Never pick actions that log out, delete, purchase, subscribe, or otherwise make 
   if(!acted){
    // Prefer non-nav (content/filter) candidates over generic chrome (menu/home links): with
    // no LLM guidance, blindly clicking a nav link is far more likely to reset/reload the page
-   // (losing any expanded filter state) than to make real progress. Uses clickFast() only
-   // (never the LLM self-heal fallback) so this path stays free even once the budget is spent.
-   const action=freshCandidates.find(c=>!c.nav&&(c.kind==="button"||c.kind==="link"))
-    ||freshCandidates.find(c=>c.kind==="button"||c.kind==="link");
+   // (losing any expanded filter state) than to make real progress. Also rank by relevance to
+   // the instruction first (same scoring summarize() already uses for the prompt text) rather
+   // than raw DOM order - seen in practice: a genuinely matching filter/result (e.g. a
+   // "사회·문화 문제지" button) can sit later in the DOM than several irrelevant ones (grade/
+   // subject buttons for unrelated values), and raw-order selection picks the wrong one first.
+   // Uses clickFast() only (never the LLM self-heal fallback) so this path stays free even
+   // once the budget is spent.
+   const fallbackTokens=tokenize(instruction);
+   const byRelevance=[...freshCandidates].sort((a,b)=>relevanceRatioTokens(b.text,fallbackTokens)-relevanceRatioTokens(a.text,fallbackTokens));
+   const action=byRelevance.find(c=>!c.nav&&(c.kind==="button"||c.kind==="link"))
+    ||byRelevance.find(c=>c.kind==="button"||c.kind==="link");
    if(!action)break;
    selector=action.selector;
    actionText=action.text||"";
