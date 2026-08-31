@@ -126,6 +126,11 @@ export async function resolve(stagehand:any,page:any,instruction:string,maxSteps
    })()`);
   }catch{return null;}
  }
+ // Structural/layout containers (page regions, headings) are never legitimate click targets,
+ // regardless of filter-flow state - clicking one does nothing. Seen repeatedly in practice:
+ // the model sometimes picks one of these instead of the actual button/link sitting inside or
+ // near it (e.g. a <header> instead of the "받기" button it contains).
+ const NON_INTERACTIVE_TAGS=new Set(["HEADER","MAIN","NAV","SECTION","ARTICLE","ASIDE","FOOTER","H1","H2","H3","H4","H5","H6"]);
 
  for(let i=0;i<maxSteps;i++){
   const url=await page.url().catch(()=>history[history.length-1]?.url||"");
@@ -184,8 +189,9 @@ Never pick actions that log out, delete, purchase, subscribe, or otherwise make 
     const next=obs?.data?.[0];
     const nextTag=next?.selector?await resolveTagName(next.selector):null;
     const nextIsLink=nextTag==="A";
-    const rejectAsLinkMidFlow=filterFlowIncomplete&&nextIsLink;
-    if(next?.selector&&!rejectAsLinkMidFlow&&await click(next.selector,`Click "${next.description}".`)){
+    const nextIsNonInteractive=Boolean(nextTag&&NON_INTERACTIVE_TAGS.has(nextTag));
+    const rejectPick=(filterFlowIncomplete&&nextIsLink)||nextIsNonInteractive;
+    if(next?.selector&&!rejectPick&&await click(next.selector,`Click "${next.description}".`)){
      selector=next.selector;
      actionText=next.description||"";
      history.push({url,action:{kind:nextIsLink?"link":"button",text:next.description,selector:next.selector}});
@@ -195,8 +201,9 @@ Never pick actions that log out, delete, purchase, subscribe, or otherwise make 
       await page.waitForTimeout(1000);
      }
      acted=true;
-    }else if(rejectAsLinkMidFlow){
-     console.error(`resolve: rejected observe() pick "${next.description}" - it resolves to a link (<a>) while a filter flow looks incomplete; falling back to mechanical selection.`);
+    }else if(rejectPick){
+     const reason=nextIsNonInteractive?`resolves to a non-interactive layout element (<${nextTag}>)`:"resolves to a link (<a>) while a filter flow looks incomplete";
+     console.error(`resolve: rejected observe() pick "${next.description}" - it ${reason}; falling back to mechanical selection.`);
     }
    }catch(e){console.error("observe step failed:",e instanceof Error?e.message:String(e));}
   }else if(!budgetWarned){
