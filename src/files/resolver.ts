@@ -153,6 +153,15 @@ export async function resolve(stagehand:any,page:any,instruction:string,maxSteps
    ||candidates.find(c=>c.url&&sameHost(c.url,url)&&!isSamePageHash(c.url,url)&&KEYWORD_RE.test(c.text));
   if(direct?.url){const resolvedUrl=resolveFileUrl(direct.url,fileType)||direct.url;history.push({url,action:direct});return{ok:true,url:resolvedUrl,history};}
 
+  // If the current page already shows a download-intent candidate (a "받기"-style button),
+  // that's a strong signal this page itself is the destination, not a waypoint - there's no
+  // good reason to navigate away to a "related item" link instead of using what's already
+  // here. Seen in practice: on exactly such a page, the model picked a generic, low-relevance
+  // sidebar link ("관련 시험 항목" / related exam item) instead of the visible "받기" button,
+  // landing on a completely unrelated exam. This check is independent of filter-flow state,
+  // since it happens well after any filter flow has already completed.
+  const currentPageHasDownloadIntent=candidates.some(c=>KEYWORD_RE.test(c.text));
+
   // Exclude already-clicked selectors from the candidate text we show the LLM, and enforce
   // it as a hard constraint in the mechanical fallback below. Note this is not an absolute
   // guarantee for the LLM path: observe() inspects the live page itself, not just our text
@@ -205,7 +214,10 @@ Never pick actions that log out, delete, purchase, subscribe, or otherwise make 
     const nextText=next?.description||"";
     const nextIsReset=RESET_INTENT_RE.test(nextText);
     const nextIsDestructive=DESTRUCTIVE_INTENT_RE.test(nextText);
-    const rejectPick=(filterFlowIncomplete&&nextIsLink)||nextIsNonInteractive||nextIsReset||nextIsDestructive;
+    const nextLooksLikeDownload=KEYWORD_RE.test(nextText);
+    const nextRelevance=relevanceRatioTokens(nextText,instructionTokens);
+    const nextIsDistraction=currentPageHasDownloadIntent&&nextIsLink&&!nextLooksLikeDownload&&nextRelevance<0.5;
+    const rejectPick=(filterFlowIncomplete&&nextIsLink)||nextIsNonInteractive||nextIsReset||nextIsDestructive||nextIsDistraction;
     if(next?.selector&&!rejectPick&&await click(next.selector,`Click "${next.description}".`)){
      selector=next.selector;
      actionText=next.description||"";
@@ -220,6 +232,7 @@ Never pick actions that log out, delete, purchase, subscribe, or otherwise make 
      const reason=nextIsDestructive?"looks like a destructive/irreversible action (log out, delete, purchase, etc.)"
       :nextIsReset?"looks like a reset/clear action that would undo progress"
       :nextIsNonInteractive?`resolves to a non-interactive layout element (<${nextTag}>)`
+      :nextIsDistraction?`navigates away to an unrelated page (relevance ${(nextRelevance*100).toFixed(0)}%) while a download button is already visible on the current page`
       :`resolves to a link (${nextTag==="A"?"<a>":`<${nextTag}> inside an <a>`}) while a filter flow looks incomplete`;
      rejectedPicks.push(nextText);
      console.error(`resolve: rejected observe() pick "${next.description}" - it ${reason}; falling back to mechanical selection.`);
