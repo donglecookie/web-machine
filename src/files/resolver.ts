@@ -1,5 +1,5 @@
 import {inspect,Candidate} from "../discovery/dom.js";
-import {KEYWORD_RE,SUBMIT_INTENT_RE,sameHost,resolveFileUrl,tokenize,relevanceRatioTokens,detectFileType,FileType} from "../discovery/patterns.js";
+import {KEYWORD_RE,SUBMIT_INTENT_RE,RESET_INTENT_RE,sameHost,resolveFileUrl,tokenize,relevanceRatioTokens,detectFileType,FileType} from "../discovery/patterns.js";
 import {readdir} from "node:fs/promises";
 
 // Strategy order (most general/common first, most site-specific last):
@@ -160,7 +160,7 @@ export async function resolve(stagehand:any,page:any,instruction:string,maxSteps
   const hasPickedFilter=history.some(h=>h.action?.kind==="button"&&!h.action?.nav&&!SUBMIT_INTENT_RE.test(h.action?.text||""));
   const hasSubmitted=history.some(h=>SUBMIT_INTENT_RE.test(h.action?.text||""));
   const filterFlowIncomplete=hasPickedFilter&&!hasSubmitted;
-  let freshCandidates=candidates.filter(c=>!(c.selector&&clicked.has(c.selector)));
+  let freshCandidates=candidates.filter(c=>!(c.selector&&clicked.has(c.selector))&&!RESET_INTENT_RE.test(c.text));
   if(filterFlowIncomplete)freshCandidates=freshCandidates.filter(c=>c.kind!=="link");
 
   const beforeFiles=await snapshotDownloads();

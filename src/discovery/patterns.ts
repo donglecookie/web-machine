@@ -13,6 +13,12 @@ export const KEYWORD_RE=/download|attachment|첨부|다운로드|받기|저장/i
 // have falsely counted as "submitted" the moment that reset button's text was recorded.
 export const SUBMIT_INTENT_RE=/검색|찾기|search|submit/i;
 
+// A "reset/clear" action always undoes progress rather than making it - there's no scenario
+// in this project's forward-progressing flow (select filters -> submit -> open result) where
+// clicking one helps. Excluded from candidates entirely (not just the LLM prompt) so the
+// judgment-free mechanical fallback can't grab one either.
+export const RESET_INTENT_RE=/초기화|필터.*지우기|지우기.*필터|clear all|reset/i;
+
 // A ZIP-container signature (PK\x03\x04 or the empty/spanned variants) covers xlsx/docx/pptx
 // (which are all ZIP archives internally) as well as plain .zip files.
 function isZipContainer(b:Buffer):boolean{

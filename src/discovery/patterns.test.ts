@@ -1,6 +1,6 @@
 import {test} from "node:test";
 import assert from "node:assert/strict";
-import {KEYWORD_RE,SUBMIT_INTENT_RE,sameHost,resolveFileUrl,tokenize,relevanceRatioTokens,relevanceRatio,detectFileType,FILE_TYPES} from "./patterns.js";
+import {KEYWORD_RE,SUBMIT_INTENT_RE,RESET_INTENT_RE,sameHost,resolveFileUrl,tokenize,relevanceRatioTokens,relevanceRatio,detectFileType,FILE_TYPES} from "./patterns.js";
 
 const PDF=FILE_TYPES.find(t=>t.name==="pdf")!;
 const XLSX=FILE_TYPES.find(t=>t.name==="xlsx")!;
@@ -78,6 +78,18 @@ test("SUBMIT_INTENT_RE matches genuine search/submit button text", () => {
 test("SUBMIT_INTENT_RE does NOT match a filter-reset button (regression: '필터' was removed after a real 'clear all filters' button falsely counted as submitted)", () => {
  assert.ok(!SUBMIT_INTENT_RE.test("선택된 필터 모두 지우기"));
  assert.ok(!SUBMIT_INTENT_RE.test("상세 조건"));
+});
+
+test("RESET_INTENT_RE matches filter-reset buttons (regression: mechanical fallback once picked '초기화' and wiped out a just-selected filter)", () => {
+ assert.ok(RESET_INTENT_RE.test("원하는 모의고사를 찾아보세요 초기화"));
+ assert.ok(RESET_INTENT_RE.test("선택된 필터 모두 지우기"));
+ assert.ok(RESET_INTENT_RE.test("Clear all filters"));
+});
+
+test("RESET_INTENT_RE does not match unrelated buttons, including a benign 'clear search text' action", () => {
+ assert.ok(!RESET_INTENT_RE.test("검색어 지우기")); // clears only the search box text, not filters - harmless
+ assert.ok(!RESET_INTENT_RE.test("검색"));
+ assert.ok(!RESET_INTENT_RE.test("받기"));
 });
 
 test("relevanceRatio treats an instruction with no meaningful tokens as fully relevant", () => {
