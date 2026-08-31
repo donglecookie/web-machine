@@ -109,6 +109,24 @@ export async function resolve(stagehand:any,page:any,instruction:string,maxSteps
  const act=(target:any)=>{budget.llmCalls++;return stagehand.act(target,{page,timeout:CALL_TIMEOUT}).then(()=>true,()=>false);};
  const click=async(selector:string,fallbackInstruction:string)=>await clickFast(selector)||await act(fallbackInstruction);
 
+ // observe()'s xpath selectors and our own dom.ts CSS-path selectors are different formats
+ // that can never be string-matched against each other, so we can't reliably look up "what
+ // kind of element did the LLM just pick" from our candidate list. Resolve it directly
+ // instead by evaluating the xpath's actual tag name - this is format-agnostic and lets us
+ // enforce policy (e.g. "no links while a filter flow is incomplete") against what was
+ // REALLY clicked, not just what we happened to list as a candidate.
+ async function resolveTagName(xpathSelector:string):Promise<string|null>{
+  if(!xpathSelector.startsWith("xpath="))return null;
+  try{
+   const raw=xpathSelector.slice(6);
+   return await page.evaluate(`(() => {
+    const r = document.evaluate(${JSON.stringify(raw)}, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null);
+    const el = r.singleNodeValue;
+    return el ? el.tagName : null;
+   })()`);
+  }catch{return null;}
+ }
+
  for(let i=0;i<maxSteps;i++){
   const url=await page.url().catch(()=>history[history.length-1]?.url||"");
   const resolvedCurrentUrl=resolveFileUrl(url,fileType);
@@ -125,19 +143,21 @@ export async function resolve(stagehand:any,page:any,instruction:string,maxSteps
   // hints, so it can in principle still name an already-clicked element - which is exactly
   // why the stuck-loop check further down remains a necessary second line of defense.
   const clicked=new Set(history.map(h=>h.action?.selector).filter(Boolean));
-  let freshCandidates=candidates.filter(c=>!(c.selector&&clicked.has(c.selector)));
 
   // A prose instruction alone ("finish the filter flow before clicking a result link") isn't
   // reliable - LLMs sometimes ignore it and grab a keyword-matching-but-wrong-date link from
-  // an unrelated "popular/featured" list anyway (seen repeatedly in practice). If some
-  // non-nav button was already clicked (a filter/category pick) but nothing matching
-  // search/submit intent has happened yet, hide link-kind candidates entirely so an
-  // in-progress filter flow can't be short-circuited by a tempting-looking link - only the
-  // remaining filter buttons and the eventual submit button stay selectable.
+  // an unrelated "popular/featured" list anyway (seen repeatedly in practice). If recent
+  // actions look like filter/category picks (short button-style labels, not a submit action)
+  // but nothing matching search/submit intent has happened yet, treat the flow as incomplete
+  // and reject any observe() pick that resolves to a real <a> link (checked directly below,
+  // not by matching against our candidate list - selector formats differ and can't be
+  // string-matched) - only filter buttons and the eventual submit button stay selectable.
   const submitLikeRe=/검색|찾기|search|submit|필터/i;
   const hasPickedFilter=history.some(h=>h.action?.kind==="button"&&!h.action?.nav&&!submitLikeRe.test(h.action?.text||""));
   const hasSubmitted=history.some(h=>submitLikeRe.test(h.action?.text||""));
-  if(hasPickedFilter&&!hasSubmitted)freshCandidates=freshCandidates.filter(c=>c.kind!=="link");
+  const filterFlowIncomplete=hasPickedFilter&&!hasSubmitted;
+  let freshCandidates=candidates.filter(c=>!(c.selector&&clicked.has(c.selector)));
+  if(filterFlowIncomplete)freshCandidates=freshCandidates.filter(c=>c.kind!=="link");
 
   const beforeFiles=await snapshotDownloads();
   let acted=false;
@@ -163,17 +183,21 @@ Next action:
 Only pick a genuinely clickable, interactive element (a real button or link) - never pick a heading, title, label, or other plain descriptive text just because it names the right thing; find the actual button/link near it instead.
 Never pick actions that log out, delete, purchase, subscribe, or otherwise make an irreversible/account-affecting change - only read/navigate/search actions.`,{page,timeout:CALL_TIMEOUT});
     const next=obs?.data?.[0];
-    if(next?.selector&&await click(next.selector,`Click "${next.description}".`)){
+    const nextTag=next?.selector?await resolveTagName(next.selector):null;
+    const nextIsLink=nextTag==="A";
+    const rejectAsLinkMidFlow=filterFlowIncomplete&&nextIsLink;
+    if(next?.selector&&!rejectAsLinkMidFlow&&await click(next.selector,`Click "${next.description}".`)){
      selector=next.selector;
      actionText=next.description||"";
-     const matched=candidates.find(c=>c.selector===next.selector);
-     history.push({url,action:{kind:matched?.kind||"observe",text:next.description,selector:next.selector,nav:matched?.nav}});
+     history.push({url,action:{kind:nextIsLink?"link":"button",text:next.description,selector:next.selector}});
      if(/search|검색/i.test(next.description)){
       await page.waitForTimeout(300);
       await act(`Type "${instruction}" into the search input field and press Enter to submit the search.`);
       await page.waitForTimeout(1000);
      }
      acted=true;
+    }else if(rejectAsLinkMidFlow){
+     console.error(`resolve: rejected observe() pick "${next.description}" - it resolves to a link (<a>) while a filter flow looks incomplete; falling back to mechanical selection.`);
     }
    }catch(e){console.error("observe step failed:",e instanceof Error?e.message:String(e));}
   }else if(!budgetWarned){
