@@ -36,8 +36,7 @@ export function newBudget(maxLlmCalls=DEFAULT_MAX_LLM_CALLS):Budget{return{llmCa
 // "사회탐구" button won't textually match an instruction asking for "사회문화"), so relevance
 // sorting is only a tie-break bonus there (ties fall back to original order, a stable sort) -
 // which is why buttons still get a much broader inclusion cap than links.
-function summarize(candidates:Candidate[],instruction:string):string{
- const tokens=tokenize(instruction);
+function summarize(candidates:Candidate[],tokens:string[]):string{
  const byRelevance=(c:Candidate)=>relevanceRatioTokens(c.text,tokens);
  const nav=candidates.filter(c=>c.nav).slice(0,TOP_N_NAV);
  const buttons=candidates.filter(c=>!c.nav&&c.kind==="button")
@@ -93,6 +92,12 @@ export async function resolve(stagehand:any,page:any,instruction:string,maxSteps
  const history:any[]=[];
  let budgetWarned=false;
  const fileType:FileType=detectFileType(instruction);
+ const instructionTokens=tokenize(instruction); // instruction never changes across this run - tokenize once, not per loop iteration
+ // observe() picks that get rejected (link/non-interactive/reset/destructive) don't go into
+ // history, since they weren't real actions - but without SOME record, the next LLM call has
+ // no idea a suggestion was already rejected and can re-propose the identical one. Tracked
+ // separately (not in history) so it doesn't look like something we actually clicked.
+ const rejectedPicks:string[]=[];
  // observe() already grounds a concrete selector, so execute it directly via the
  // Playwright-style Locator API (no LLM call) instead of re-asking the model what to do.
  // Only fall back to the LLM-driven act() (which re-reasons and self-heals) if the direct
@@ -173,10 +178,10 @@ export async function resolve(stagehand:any,page:any,instruction:string,maxSteps
     const obs=await stagehand.observe(`Goal: find "${instruction}".
 
 Prior actions this session (most recent last; the elements below are already excluded from the candidate list so you can't pick them again). Use this to judge whether a filter flow is still in progress:
-${recap(history)}
+${recap(history)}${rejectedPicks.length?`\n\nAlready rejected this session (not real progress - don't re-suggest these): ${rejectedPicks.slice(-5).join("; ")}`:""}
 
 Page candidates:
-${summarize(freshCandidates,instruction)}
+${summarize(freshCandidates,instructionTokens)}
 
 Next action:
 - If any filters were already set in prior actions above (a category/date/etc. was picked, most recent last) but no search/submit button has been clicked yet, that flow is INCOMPLETE - pick the next unset filter, or the submit/search button, even if a matching-looking result link is also visible. A link that only coincidentally shares words with the goal (e.g. from a "popular/featured" list, not the actual filtered results) can be the wrong item entirely - finishing and submitting the filters first gets the genuinely matching result.
@@ -209,6 +214,7 @@ Never pick actions that log out, delete, purchase, subscribe, or otherwise make 
       :nextIsReset?"looks like a reset/clear action that would undo progress"
       :nextIsNonInteractive?`resolves to a non-interactive layout element (<${nextTag}>)`
       :"resolves to a link (<a>) while a filter flow looks incomplete";
+     rejectedPicks.push(nextText);
      console.error(`resolve: rejected observe() pick "${next.description}" - it ${reason}; falling back to mechanical selection.`);
     }
    }catch(e){console.error("observe step failed:",e instanceof Error?e.message:String(e));}
@@ -227,8 +233,7 @@ Never pick actions that log out, delete, purchase, subscribe, or otherwise make 
    // subject buttons for unrelated values), and raw-order selection picks the wrong one first.
    // Uses clickFast() only (never the LLM self-heal fallback) so this path stays free even
    // once the budget is spent.
-   const fallbackTokens=tokenize(instruction);
-   const byRelevance=[...freshCandidates].sort((a,b)=>relevanceRatioTokens(b.text,fallbackTokens)-relevanceRatioTokens(a.text,fallbackTokens));
+   const byRelevance=[...freshCandidates].sort((a,b)=>relevanceRatioTokens(b.text,instructionTokens)-relevanceRatioTokens(a.text,instructionTokens));
    const action=byRelevance.find(c=>!c.nav&&(c.kind==="button"||c.kind==="link"))
     ||byRelevance.find(c=>c.kind==="button"||c.kind==="link");
    if(!action)break;
