@@ -120,14 +120,20 @@ export async function resolve(stagehand:any,page:any,instruction:string,maxSteps
  // instead by evaluating the xpath's actual tag name - this is format-agnostic and lets us
  // enforce policy (e.g. "no links while a filter flow is incomplete") against what was
  // REALLY clicked, not just what we happened to list as a candidate.
- async function resolveTagName(xpathSelector:string):Promise<string|null>{
+ //
+ // Also walks up to the nearest <a> ancestor (via closest()), not just the exact node: sites
+ // commonly wrap an icon/span/div inside an <a> for styling, and observe() sometimes targets
+ // that inner element rather than the anchor itself - checking only the exact tag missed this
+ // twice in practice (once inert, once navigating to a completely unrelated result).
+ async function resolveTarget(xpathSelector:string):Promise<{tagName:string;isInsideLink:boolean}|null>{
   if(!xpathSelector.startsWith("xpath="))return null;
   try{
    const raw=xpathSelector.slice(6);
    return await page.evaluate(`(() => {
     const r = document.evaluate(${JSON.stringify(raw)}, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null);
     const el = r.singleNodeValue;
-    return el ? el.tagName : null;
+    if (!el) return null;
+    return { tagName: el.tagName, isInsideLink: Boolean(el.closest && el.closest('a')) };
    })()`);
   }catch{return null;}
  }
@@ -192,8 +198,9 @@ Next action:
 Only pick a genuinely clickable, interactive element (a real button or link) - never pick a heading, title, label, or other plain descriptive text just because it names the right thing; find the actual button/link near it instead.
 Never pick actions that log out, delete, purchase, subscribe, or otherwise make an irreversible/account-affecting change - only read/navigate/search actions.`,{page,timeout:CALL_TIMEOUT});
     const next=obs?.data?.[0];
-    const nextTag=next?.selector?await resolveTagName(next.selector):null;
-    const nextIsLink=nextTag==="A";
+    const nextTarget=next?.selector?await resolveTarget(next.selector):null;
+    const nextTag=nextTarget?.tagName??null;
+    const nextIsLink=nextTag==="A"||Boolean(nextTarget?.isInsideLink);
     const nextIsNonInteractive=Boolean(nextTag&&NON_INTERACTIVE_TAGS.has(nextTag));
     const nextText=next?.description||"";
     const nextIsReset=RESET_INTENT_RE.test(nextText);
@@ -213,7 +220,7 @@ Never pick actions that log out, delete, purchase, subscribe, or otherwise make 
      const reason=nextIsDestructive?"looks like a destructive/irreversible action (log out, delete, purchase, etc.)"
       :nextIsReset?"looks like a reset/clear action that would undo progress"
       :nextIsNonInteractive?`resolves to a non-interactive layout element (<${nextTag}>)`
-      :"resolves to a link (<a>) while a filter flow looks incomplete";
+      :`resolves to a link (${nextTag==="A"?"<a>":`<${nextTag}> inside an <a>`}) while a filter flow looks incomplete`;
      rejectedPicks.push(nextText);
      console.error(`resolve: rejected observe() pick "${next.description}" - it ${reason}; falling back to mechanical selection.`);
     }
