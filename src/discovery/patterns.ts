@@ -19,6 +19,12 @@ export const SUBMIT_INTENT_RE=/검색|찾기|search|submit/i;
 // judgment-free mechanical fallback can't grab one either.
 export const RESET_INTENT_RE=/초기화|필터.*지우기|지우기.*필터|clear all|reset/i;
 
+// Structural backstop for the "never log out/delete/purchase/subscribe" prompt instruction -
+// prose alone has repeatedly proven insufficient in this codebase (the model has ignored
+// similarly-worded guidance for other cases too), so this pattern is also checked directly
+// against what was actually about to be clicked, not just written into the prompt.
+export const DESTRUCTIVE_INTENT_RE=/로그아웃|탈퇴|삭제|결제|구매|구독\s*(신청|취소)?|log\s*out|sign\s*out|delete|unsubscribe|purchase|checkout/i;
+
 // A ZIP-container signature (PK\x03\x04 or the empty/spanned variants) covers xlsx/docx/pptx
 // (which are all ZIP archives internally) as well as plain .zip files.
 function isZipContainer(b:Buffer):boolean{

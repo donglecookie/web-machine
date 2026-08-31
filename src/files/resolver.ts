@@ -1,5 +1,5 @@
 import {inspect,Candidate} from "../discovery/dom.js";
-import {KEYWORD_RE,SUBMIT_INTENT_RE,RESET_INTENT_RE,sameHost,resolveFileUrl,tokenize,relevanceRatioTokens,detectFileType,FileType} from "../discovery/patterns.js";
+import {KEYWORD_RE,SUBMIT_INTENT_RE,RESET_INTENT_RE,DESTRUCTIVE_INTENT_RE,sameHost,resolveFileUrl,tokenize,relevanceRatioTokens,detectFileType,FileType} from "../discovery/patterns.js";
 import {readdir} from "node:fs/promises";
 
 // Strategy order (most general/common first, most site-specific last):
@@ -190,7 +190,10 @@ Never pick actions that log out, delete, purchase, subscribe, or otherwise make 
     const nextTag=next?.selector?await resolveTagName(next.selector):null;
     const nextIsLink=nextTag==="A";
     const nextIsNonInteractive=Boolean(nextTag&&NON_INTERACTIVE_TAGS.has(nextTag));
-    const rejectPick=(filterFlowIncomplete&&nextIsLink)||nextIsNonInteractive;
+    const nextText=next?.description||"";
+    const nextIsReset=RESET_INTENT_RE.test(nextText);
+    const nextIsDestructive=DESTRUCTIVE_INTENT_RE.test(nextText);
+    const rejectPick=(filterFlowIncomplete&&nextIsLink)||nextIsNonInteractive||nextIsReset||nextIsDestructive;
     if(next?.selector&&!rejectPick&&await click(next.selector,`Click "${next.description}".`)){
      selector=next.selector;
      actionText=next.description||"";
@@ -202,7 +205,10 @@ Never pick actions that log out, delete, purchase, subscribe, or otherwise make 
      }
      acted=true;
     }else if(rejectPick){
-     const reason=nextIsNonInteractive?`resolves to a non-interactive layout element (<${nextTag}>)`:"resolves to a link (<a>) while a filter flow looks incomplete";
+     const reason=nextIsDestructive?"looks like a destructive/irreversible action (log out, delete, purchase, etc.)"
+      :nextIsReset?"looks like a reset/clear action that would undo progress"
+      :nextIsNonInteractive?`resolves to a non-interactive layout element (<${nextTag}>)`
+      :"resolves to a link (<a>) while a filter flow looks incomplete";
      console.error(`resolve: rejected observe() pick "${next.description}" - it ${reason}; falling back to mechanical selection.`);
     }
    }catch(e){console.error("observe step failed:",e instanceof Error?e.message:String(e));}

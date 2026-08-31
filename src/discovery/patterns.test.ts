@@ -1,6 +1,6 @@
 import {test} from "node:test";
 import assert from "node:assert/strict";
-import {KEYWORD_RE,SUBMIT_INTENT_RE,RESET_INTENT_RE,sameHost,resolveFileUrl,tokenize,relevanceRatioTokens,relevanceRatio,detectFileType,FILE_TYPES} from "./patterns.js";
+import {KEYWORD_RE,SUBMIT_INTENT_RE,RESET_INTENT_RE,DESTRUCTIVE_INTENT_RE,sameHost,resolveFileUrl,tokenize,relevanceRatioTokens,relevanceRatio,detectFileType,FILE_TYPES} from "./patterns.js";
 
 const PDF=FILE_TYPES.find(t=>t.name==="pdf")!;
 const XLSX=FILE_TYPES.find(t=>t.name==="xlsx")!;
@@ -90,6 +90,21 @@ test("RESET_INTENT_RE does not match unrelated buttons, including a benign 'clea
  assert.ok(!RESET_INTENT_RE.test("검색어 지우기")); // clears only the search box text, not filters - harmless
  assert.ok(!RESET_INTENT_RE.test("검색"));
  assert.ok(!RESET_INTENT_RE.test("받기"));
+});
+
+test("DESTRUCTIVE_INTENT_RE matches irreversible/account-affecting actions, Korean and English", () => {
+ assert.ok(DESTRUCTIVE_INTENT_RE.test("로그아웃"));
+ assert.ok(DESTRUCTIVE_INTENT_RE.test("계정 탈퇴하기"));
+ assert.ok(DESTRUCTIVE_INTENT_RE.test("게시글 삭제"));
+ assert.ok(DESTRUCTIVE_INTENT_RE.test("구독 신청"));
+ assert.ok(DESTRUCTIVE_INTENT_RE.test("Log out"));
+ assert.ok(DESTRUCTIVE_INTENT_RE.test("Delete this file"));
+});
+
+test("DESTRUCTIVE_INTENT_RE does not match ordinary read/navigate actions", () => {
+ assert.ok(!DESTRUCTIVE_INTENT_RE.test("받기"));
+ assert.ok(!DESTRUCTIVE_INTENT_RE.test("검색"));
+ assert.ok(!DESTRUCTIVE_INTENT_RE.test("2025년 고3 9월 모평 사회문화"));
 });
 
 test("relevanceRatio treats an instruction with no meaningful tokens as fully relevant", () => {
