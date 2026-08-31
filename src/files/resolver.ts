@@ -1,5 +1,5 @@
 import {inspect,Candidate} from "../discovery/dom.js";
-import {KEYWORD_RE,SUBMIT_INTENT_RE,RESET_INTENT_RE,DESTRUCTIVE_INTENT_RE,sameHost,resolveFileUrl,tokenize,relevanceRatioTokens,detectFileType,FileType} from "../discovery/patterns.js";
+import {KEYWORD_RE,SUBMIT_INTENT_RE,RESET_INTENT_RE,DESTRUCTIVE_INTENT_RE,sameHost,resolveFileUrl,tokenize,relevanceRatioTokens,computeTokenWeights,detectFileType,FileType} from "../discovery/patterns.js";
 import {readdir} from "node:fs/promises";
 
 // Strategy order (most general/common first, most site-specific last):
@@ -36,8 +36,8 @@ export function newBudget(maxLlmCalls=DEFAULT_MAX_LLM_CALLS):Budget{return{llmCa
 // "사회탐구" button won't textually match an instruction asking for "사회문화"), so relevance
 // sorting is only a tie-break bonus there (ties fall back to original order, a stable sort) -
 // which is why buttons still get a much broader inclusion cap than links.
-function summarize(candidates:Candidate[],tokens:string[]):string{
- const byRelevance=(c:Candidate)=>relevanceRatioTokens(c.text,tokens);
+function summarize(candidates:Candidate[],tokens:string[],weights:Map<string,number>):string{
+ const byRelevance=(c:Candidate)=>relevanceRatioTokens(c.text,tokens,weights);
  const nav=candidates.filter(c=>c.nav).slice(0,TOP_N_NAV);
  const buttons=candidates.filter(c=>!c.nav&&c.kind==="button")
   .map(c=>({c,r:byRelevance(c)})).sort((a,b)=>b.r-a.r).slice(0,TOP_N_BUTTON).map(x=>x.c);
@@ -183,6 +183,12 @@ export async function resolve(stagehand:any,page:any,instruction:string,maxSteps
   let freshCandidates=candidates.filter(c=>!(c.selector&&clicked.has(c.selector))&&!RESET_INTENT_RE.test(c.text));
   if(filterFlowIncomplete)freshCandidates=freshCandidates.filter(c=>c.kind!=="link");
 
+  // Weight instruction tokens by how distinctive they are within THIS page's actual
+  // candidates (rare token = more informative = higher weight) - computed fresh each
+  // iteration since the candidate pool changes as we navigate. Falls back to uniform
+  // weighting automatically when there's nothing yet to learn from (see computeTokenWeights).
+  const tokenWeights=computeTokenWeights(instructionTokens,freshCandidates.map(c=>c.text));
+
   const beforeFiles=await snapshotDownloads();
   let acted=false;
   let selector:string|undefined;
@@ -196,7 +202,7 @@ Prior actions this session (most recent last; the elements below are already exc
 ${recap(history)}${rejectedPicks.length?`\n\nAlready rejected this session (not real progress - don't re-suggest these): ${rejectedPicks.slice(-5).join("; ")}`:""}
 
 Page candidates:
-${summarize(freshCandidates,instructionTokens)}
+${summarize(freshCandidates,instructionTokens,tokenWeights)}
 
 Next action:
 - If any filters were already set in prior actions above (a category/date/etc. was picked, most recent last) but no search/submit button has been clicked yet, that flow is INCOMPLETE - pick the next unset filter, or the submit/search button, even if a matching-looking result link is also visible. A link that only coincidentally shares words with the goal (e.g. from a "popular/featured" list, not the actual filtered results) can be the wrong item entirely - finishing and submitting the filters first gets the genuinely matching result.
@@ -215,7 +221,7 @@ Never pick actions that log out, delete, purchase, subscribe, or otherwise make 
     const nextIsReset=RESET_INTENT_RE.test(nextText);
     const nextIsDestructive=DESTRUCTIVE_INTENT_RE.test(nextText);
     const nextLooksLikeDownload=KEYWORD_RE.test(nextText);
-    const nextRelevance=relevanceRatioTokens(nextText,instructionTokens);
+    const nextRelevance=relevanceRatioTokens(nextText,instructionTokens,tokenWeights);
     const nextIsDistraction=currentPageHasDownloadIntent&&nextIsLink&&!nextLooksLikeDownload&&nextRelevance===0;
     const rejectPick=(filterFlowIncomplete&&nextIsLink)||nextIsNonInteractive||nextIsReset||nextIsDestructive||nextIsDistraction;
     if(next?.selector&&!rejectPick&&await click(next.selector,`Click "${next.description}".`)){
@@ -264,7 +270,7 @@ Never pick actions that log out, delete, purchase, subscribe, or otherwise make 
    // subject buttons for unrelated values), and raw-order selection picks the wrong one first.
    // Uses clickFast() only (never the LLM self-heal fallback) so this path stays free even
    // once the budget is spent.
-   const byRelevance=[...freshCandidates].sort((a,b)=>relevanceRatioTokens(b.text,instructionTokens)-relevanceRatioTokens(a.text,instructionTokens));
+   const byRelevance=[...freshCandidates].sort((a,b)=>relevanceRatioTokens(b.text,instructionTokens,tokenWeights)-relevanceRatioTokens(a.text,instructionTokens,tokenWeights));
    const action=byRelevance.find(c=>!c.nav&&(c.kind==="button"||c.kind==="link"))
     ||byRelevance.find(c=>c.kind==="button"||c.kind==="link");
    if(!action)break;

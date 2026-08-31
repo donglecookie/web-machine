@@ -1,6 +1,6 @@
 import {test} from "node:test";
 import assert from "node:assert/strict";
-import {KEYWORD_RE,SUBMIT_INTENT_RE,RESET_INTENT_RE,DESTRUCTIVE_INTENT_RE,sameHost,resolveFileUrl,tokenize,relevanceRatioTokens,relevanceRatio,detectFileType,FILE_TYPES} from "./patterns.js";
+import {KEYWORD_RE,SUBMIT_INTENT_RE,RESET_INTENT_RE,DESTRUCTIVE_INTENT_RE,sameHost,resolveFileUrl,tokenize,relevanceRatioTokens,relevanceRatio,computeTokenWeights,detectFileType,FILE_TYPES} from "./patterns.js";
 
 const PDF=FILE_TYPES.find(t=>t.name==="pdf")!;
 const XLSX=FILE_TYPES.find(t=>t.name==="xlsx")!;
@@ -132,4 +132,40 @@ test("DESTRUCTIVE_INTENT_RE does not match ordinary read/navigate actions", () =
 
 test("relevanceRatio treats an instruction with no meaningful tokens as fully relevant", () => {
  assert.equal(relevanceRatio("anything.pdf",""),1);
+});
+
+// The ranking system is meant to generalize beyond exam-paper search (e.g. "스페인 지도"
+// (Spain map), "앵무새 사진" (parrot photo)) - these check the same underlying mechanisms
+// (fuzzy matching, IDF-style weighting) in those non-exam domains.
+
+test("relevanceRatio: fuzzy matching handles morphological variation generally (not just the Korean exam-suffix cases it was first noticed on)", () => {
+ // "앵무새들의" (plural/possessive form) doesn't literally contain "앵무새" as an exact
+ // substring match target once suffixed, but should still score as a strong partial match.
+ assert.ok(relevanceRatio("아름다운 앵무새들의 사진.jpg","앵무새 사진")>0.5);
+});
+
+test("computeTokenWeights down-weights common words and up-weights distinctive ones within the current candidate pool, without any external corpus", () => {
+ const tokens=tokenize("앵무새 사진");
+ const candidateTexts=[
+  "앵무새 사진 001.jpg","앵무새 사진 002.jpg","앵무새 사진 003.jpg",
+  "강아지 사진 004.jpg","고양이 사진 005.jpg",
+ ];
+ const weights=computeTokenWeights(tokens,candidateTexts);
+ // "사진" (photo) appears in every candidate - low signal, weight should stay near 1.
+ // "앵무새" (parrot) appears in only 3 of 5 - more distinctive, weight should exceed "사진"'s.
+ assert.ok((weights.get("앵무새")??0)>(weights.get("사진")??0));
+});
+
+test("computeTokenWeights lets a rare-word match correctly outrank a common-word-only match", () => {
+ const tokens=tokenize("앵무새 사진");
+ const candidateTexts=["앵무새 사진 001.jpg","강아지 사진 002.jpg","고양이 사진 003.jpg","말 사진 004.jpg"];
+ const weights=computeTokenWeights(tokens,candidateTexts);
+ const parrotMatch=relevanceRatioTokens("앵무새 사진 001.jpg",tokens,weights);
+ const genericPhotoOnly=relevanceRatioTokens("강아지 사진 002.jpg",tokens,weights);
+ assert.ok(parrotMatch>genericPhotoOnly);
+});
+
+test("relevanceRatio: an entirely unrelated domain (Spain map) scores near zero against exam-paper-style text, and high against a genuine match", () => {
+ assert.equal(relevanceRatio("2025년 고3 9월 모평(평가원) 사회문화_문제지.pdf","스페인 지도"),0);
+ assert.ok(relevanceRatio("스페인 지도 고화질.jpg","스페인 지도")>=0.5);
 });

@@ -122,32 +122,93 @@ export function resolveFileUrl(url:string,fileType:FileType=ANY_FILE_TYPE):strin
 export function tokenize(s:string):string[]{
  return s.toLowerCase().split(/[\s,·\-–—/|_()]+/).map(t=>t.trim()).filter(t=>t.length>=2);
 }
-// Korean compound subject names are often written with a middle dot for readability (e.g.
-// "사회·문화"), but an instruction referring to the same subject rarely includes it (e.g.
-// "사회문화"). Since relevance is checked via substring match against the candidate's RAW
-// text (not a tokenized version of it), that single dot character silently broke the match
-// for essentially every "사회·문화"/"정치·법"-style subject across this whole session -
-// stripping it from the text side (not just the delimiter list used for the instruction side)
-// fixes the comparison without needing to touch how instructions are tokenized.
+
+// Korean compound names are often written with a middle dot for readability (e.g. "사회·문화")
+// while an instruction referring to the same thing usually omits it (e.g. "사회문화") - strip
+// it before comparing so that single character doesn't silently break an otherwise-exact match.
 function stripMiddleDot(s:string):string{
  return s.replace(/·/g,"");
 }
-export function relevanceRatioTokens(text:string,tokens:string[]):number{
+
+// Character-bigram overlap (Dice coefficient) - a general, language-agnostic way to score how
+// similar two short strings are, without needing exact substring containment. This is what
+// makes matching robust to morphological variation generally (differing particles/suffixes,
+// spacing, minor spelling differences) instead of hand-coding one exception at a time for
+// every specific pattern noticed in testing (a search for "앵무새 사진" or "스페인 지도" hits
+// the exact same class of variation as "사회문화"/"사회·문화" did, just in a different domain).
+function bigrams(s:string):Set<string>{
+ const out=new Set<string>();
+ if(s.length<2){if(s)out.add(s);return out;}
+ for(let i=0;i<s.length-1;i++)out.add(s.slice(i,i+2));
+ return out;
+}
+function diceCoefficient(a:string,b:string):number{
+ if(a===b)return 1;
+ const A=bigrams(a),B=bigrams(b);
+ if(!A.size||!B.size)return 0;
+ let overlap=0;
+ for(const g of A)if(B.has(g))overlap++;
+ return (2*overlap)/(A.size+B.size);
+}
+const FUZZY_MATCH_THRESHOLD=0.6;
+
+// Scores a single instruction token against a candidate's text. Three tiers, tried in order:
+// 1. Exact substring - the common case, full credit.
+// 2. Bare-digit match for tokens containing a year (19xx/20xx) - a school year like
+//    "2025학년도" and a calendar-year filter button labeled "2025년" refer to the same year
+//    but differ in suffix. Kept as an explicit numeric check rather than folded into the
+//    general fuzzy tier below: adjacent years (e.g. "2024"/"2025") share enough digits that
+//    bigram overlap alone can't reliably tell them apart, which would risk treating the WRONG
+//    year as a match.
+// 3. Fuzzy bigram overlap against the candidate's own tokens - the general fallback for
+//    everything else (morphological/spelling variation), at partial credit proportional to
+//    how close the match is, so a near-match still outranks a candidate with no relation at
+//    all instead of scoring identically to it.
+function tokenMatchScore(normalizedText:string,textTokens:string[],tok:string):number{
+ if(normalizedText.includes(tok))return 1;
+ const year=tok.match(/(19|20)\d{2}/)?.[0];
+ if(year)return normalizedText.includes(year)?1:0;
+ if(!textTokens.length)return 0;
+ let best=0;
+ for(const tt of textTokens){const d=diceCoefficient(tok,tt);if(d>best)best=d;}
+ return best>=FUZZY_MATCH_THRESHOLD?best:0;
+}
+
+// Not every instruction word is equally informative: in an exam search, "모의고사"/"문제지"
+// appears on nearly every candidate and says little about which one is right, while
+// "사회문화" appears on very few and is the actual distinguishing signal. In an image search
+// like "앵무새 사진", "사진" is similarly generic while "앵무새" is what actually matters. This
+// computes that weighting directly from the current candidate pool (how many candidates each
+// token appears in) - no external word-frequency corpus needed, and it naturally adapts to
+// whatever the candidates on THIS page look like rather than assuming any one domain's
+// vocabulary. Optional: omitting it (or passing texts=[]) falls back to treating every token
+// equally, which is still a reasonable default when there's no candidate pool yet to learn from.
+export function computeTokenWeights(tokens:string[],candidateTexts:string[]):Map<string,number>{
+ const weights=new Map<string,number>();
+ const n=candidateTexts.length;
+ if(!n){for(const tok of tokens)weights.set(tok,1);return weights;}
+ const normalized=candidateTexts.map(t=>stripMiddleDot(t.toLowerCase()));
+ for(const tok of tokens){
+  const docFreq=normalized.filter(t=>t.includes(tok)).length;
+  // Smoothed inverse document frequency: common tokens (high docFreq) approach a weight of
+  // ~1, rare/distinctive ones (low docFreq) go higher - never below 1, so no token actively
+  // hurts a match, it just doesn't help as much as a distinctive one would.
+  weights.set(tok,Math.log((n+1)/(docFreq+1))+1);
+ }
+ return weights;
+}
+
+export function relevanceRatioTokens(text:string,tokens:string[],weights?:Map<string,number>):number{
  if(!tokens.length)return 1;
- const t=stripMiddleDot(text.toLowerCase());
- const matched=tokens.filter(tok=>{
-  if(t.includes(tok))return true;
-  // A 4-digit year is often written with a different suffix depending on context - an
-  // instruction's "2025학년도" (school year) won't literally match a filter button labeled
-  // "2025년" (calendar year) even though they refer to the same year. Extracting the bare
-  // digits and comparing those directly avoids depending on which suffix either side used.
-  // Seen in practice: with no such fallback, ALL year buttons (2024/2025/2026...) tied at
-  // zero relevance, so the fallback had no signal for which one was actually correct and
-  // clicked through them in raw order - including overwriting the right one.
-  const year=tok.match(/(19|20)\d{2}/)?.[0];
-  return Boolean(year&&t.includes(year));
- });
- return matched.length/tokens.length;
+ const normalizedText=stripMiddleDot(text.toLowerCase());
+ const textTokens=tokenize(normalizedText);
+ let scoreSum=0,weightSum=0;
+ for(const tok of tokens){
+  const w=weights?.get(tok)??1;
+  scoreSum+=tokenMatchScore(normalizedText,textTokens,tok)*w;
+  weightSum+=w;
+ }
+ return weightSum?scoreSum/weightSum:0;
 }
 export function relevanceRatio(text:string,instruction:string):number{
  return relevanceRatioTokens(text,tokenize(instruction));
