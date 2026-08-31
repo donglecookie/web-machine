@@ -122,9 +122,19 @@ export function resolveFileUrl(url:string,fileType:FileType=ANY_FILE_TYPE):strin
 export function tokenize(s:string):string[]{
  return s.toLowerCase().split(/[\s,·\-–—/|_()]+/).map(t=>t.trim()).filter(t=>t.length>=2);
 }
+// Korean compound subject names are often written with a middle dot for readability (e.g.
+// "사회·문화"), but an instruction referring to the same subject rarely includes it (e.g.
+// "사회문화"). Since relevance is checked via substring match against the candidate's RAW
+// text (not a tokenized version of it), that single dot character silently broke the match
+// for essentially every "사회·문화"/"정치·법"-style subject across this whole session -
+// stripping it from the text side (not just the delimiter list used for the instruction side)
+// fixes the comparison without needing to touch how instructions are tokenized.
+function stripMiddleDot(s:string):string{
+ return s.replace(/·/g,"");
+}
 export function relevanceRatioTokens(text:string,tokens:string[]):number{
  if(!tokens.length)return 1;
- const t=text.toLowerCase();
+ const t=stripMiddleDot(text.toLowerCase());
  return tokens.filter(tok=>t.includes(tok)).length/tokens.length;
 }
 export function relevanceRatio(text:string,instruction:string):number{

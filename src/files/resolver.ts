@@ -216,7 +216,7 @@ Never pick actions that log out, delete, purchase, subscribe, or otherwise make 
     const nextIsDestructive=DESTRUCTIVE_INTENT_RE.test(nextText);
     const nextLooksLikeDownload=KEYWORD_RE.test(nextText);
     const nextRelevance=relevanceRatioTokens(nextText,instructionTokens);
-    const nextIsDistraction=currentPageHasDownloadIntent&&nextIsLink&&!nextLooksLikeDownload&&nextRelevance<0.5;
+    const nextIsDistraction=currentPageHasDownloadIntent&&nextIsLink&&!nextLooksLikeDownload&&nextRelevance===0;
     const rejectPick=(filterFlowIncomplete&&nextIsLink)||nextIsNonInteractive||nextIsReset||nextIsDestructive||nextIsDistraction;
     if(next?.selector&&!rejectPick&&await click(next.selector,`Click "${next.description}".`)){
      selector=next.selector;

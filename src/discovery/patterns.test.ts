@@ -63,6 +63,14 @@ test("relevanceRatioTokens scores fraction of instruction tokens found in the te
  assert.equal(relevanceRatioTokens("2025년 고3 9월 모평(평가원) 한문Ⅰ_문제지.pdf",tokens)<0.5,true);
 });
 
+test("relevanceRatioTokens matches through a middle dot in the candidate text (regression: '사회문화' in the instruction failed to match '사회·문화' as actually written on real sites, silently under-scoring relevance all session)", () => {
+ const tokens=tokenize("2025학년도 9월 모의평가 사회문화");
+ const withDot=relevanceRatioTokens("2025년 고3 9월 모평(평가원) 사회·문화",tokens);
+ const withoutDot=relevanceRatioTokens("2025년 고3 9월 모평(평가원) 사회문화",tokens);
+ assert.equal(withDot,withoutDot);
+ assert.ok(withDot>=0.5);
+});
+
 test("relevanceRatio (convenience wrapper) matches relevanceRatioTokens for the same inputs", () => {
  const instruction="2025학년도 9월 모의평가 사회문화";
  const text="2025년 고3 9월 모평(평가원) 사회문화_문제지.pdf";
