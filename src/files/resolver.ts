@@ -96,12 +96,12 @@ export function newBudget(maxLlmCalls=DEFAULT_MAX_LLM_CALLS):Budget{return{llmCa
 // "사회탐구" button won't textually match an instruction asking for "사회문화"), so relevance
 // sorting is only a tie-break bonus there (ties fall back to original order, a stable sort) -
 // which is why buttons still get a much broader inclusion cap than links.
-function summarize(candidates:Candidate[],score:(c:Candidate)=>number):string{
+function summarize(candidates:Candidate[],score:(c:Candidate)=>number,cap:{button:number;link:number}):string{
  const nav=candidates.filter(c=>c.nav).slice(0,TOP_N_NAV);
  const buttons=candidates.filter(c=>!c.nav&&c.kind==="button")
-  .map(c=>({c,r:score(c)})).sort((a,b)=>b.r-a.r).slice(0,TOP_N_BUTTON).map(x=>x.c);
+  .map(c=>({c,r:score(c)})).sort((a,b)=>b.r-a.r).slice(0,cap.button).map(x=>x.c);
  const links=candidates.filter(c=>!c.nav&&c.kind!=="button")
-  .map(c=>({c,r:score(c)})).sort((a,b)=>b.r-a.r).slice(0,TOP_N_LINK).map(x=>x.c);
+  .map(c=>({c,r:score(c)})).sort((a,b)=>b.r-a.r).slice(0,cap.link).map(x=>x.c);
  const picked=[...nav,...buttons,...links].filter((c,i,arr)=>arr.findIndex(x=>x.text===c.text&&x.url===c.url)===i);
  return picked.map((c,i)=>`${i+1}. [${c.kind}${c.nav?"/nav":""}] "${c.text.slice(0,80)}"${c.url?` -> ${c.url}`:""}`).join("\n")||"(none)";
 }
@@ -157,6 +157,10 @@ export async function resolve(stagehand:any,page:any,instruction:string,maxSteps
  // no idea a suggestion was already rejected and can re-propose the identical one. Tracked
  // separately (not in history) so it doesn't look like something we actually clicked.
  const rejectedPicks:string[]=[];
+ // Mutable, adaptive-to-this-run candidate caps (see the "request too large" catch below) -
+ // start at the normal defaults and only shrink if this specific provider/run turns out to
+ // have a small enough per-minute token ceiling that the normal size doesn't fit.
+ let candidateCap={button:TOP_N_BUTTON,link:TOP_N_LINK};
  // observe() already grounds a concrete selector, so execute it directly via the
  // Playwright-style Locator API (no LLM call) instead of re-asking the model what to do.
  // Only fall back to the LLM-driven act() (which re-reasons and self-heals) if the direct
@@ -263,7 +267,7 @@ Prior actions (excluded from candidates below; use to judge if a filter flow is 
 ${recap(history)}${rejectedPicks.length?`\nAlready rejected, don't re-suggest: ${rejectedPicks.slice(-5).join("; ")}`:""}
 
 Page candidates:
-${summarize(freshCandidates,scoreCandidate)}
+${summarize(freshCandidates,scoreCandidate,candidateCap)}
 
 Next action:
 - Filters set but not submitted yet -> finish filters or submit first, even if a tempting result link is visible (it may be from an unrelated list).
@@ -309,6 +313,16 @@ Never log out, delete, purchase, subscribe, or make other irreversible changes.`
     if(/\b402\b|insufficient.*credit|requires more credits|payment required/i.test(msg)){
      budget.llmCalls=budget.maxLlmCalls;
      if(!budgetWarned){console.error("resolve: LLM provider rejected the request for insufficient credits - continuing with free heuristic clicks only.");budgetWarned=true;}
+    }else if(/request too large.*tokens per minute/i.test(msg)){
+     // Unlike the payment case above, this specific message means the SINGLE request already
+     // exceeds the provider's per-minute token ceiling on its own (e.g. "Limit 8000, Requested
+     // 19758") - waiting would NOT help, since retrying sends the identical oversized prompt
+     // and fails identically again. The candidate list is what's driving prompt size on a
+     // page with many similarly-shaped buttons (seen in practice), so shrink it for the rest
+     // of this run - adaptive to this run only, not a global default, since a provider with
+     // more headroom shouldn't be penalized by a cap sized for this one's limit.
+     candidateCap={button:Math.max(10,Math.floor(candidateCap.button/2)),link:Math.max(5,Math.floor(candidateCap.link/2))};
+     console.error(`resolve: request exceeded the provider's per-minute token limit - shrinking candidate list to ${candidateCap.button} buttons / ${candidateCap.link} links for the rest of this run.`);
     }
    }
   }else if(!budgetWarned){
