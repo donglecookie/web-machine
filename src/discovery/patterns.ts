@@ -189,6 +189,13 @@ export function computeTokenWeights(tokens:string[],candidateTexts:string[]):Map
  if(!n){for(const tok of tokens)weights.set(tok,1);return weights;}
  const normalized=candidateTexts.map(t=>stripMiddleDot(t.toLowerCase()));
  for(const tok of tokens){
+  // Deliberately exact-substring only here, not fuzzy - computing document frequency with
+  // the same bigram fuzzy matching used for actual scoring would mean re-running that
+  // comparison against every candidate for every token just to build the weights, then again
+  // to apply them. The tradeoff: a token that only fuzzy-matches many candidates (rather than
+  // exact-matching them) looks rarer to this weighting than it truly is, so it can end up
+  // slightly over-weighted - acceptable since the floor is always 1 (never penalized below
+  // uniform), just occasionally not discounted as much as ideal.
   const docFreq=normalized.filter(t=>t.includes(tok)).length;
   // Smoothed inverse document frequency: common tokens (high docFreq) approach a weight of
   // ~1, rare/distinctive ones (low docFreq) go higher - never below 1, so no token actively

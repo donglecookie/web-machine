@@ -36,13 +36,12 @@ export function newBudget(maxLlmCalls=DEFAULT_MAX_LLM_CALLS):Budget{return{llmCa
 // "사회탐구" button won't textually match an instruction asking for "사회문화"), so relevance
 // sorting is only a tie-break bonus there (ties fall back to original order, a stable sort) -
 // which is why buttons still get a much broader inclusion cap than links.
-function summarize(candidates:Candidate[],tokens:string[],weights:Map<string,number>):string{
- const byRelevance=(c:Candidate)=>relevanceRatioTokens(c.text,tokens,weights);
+function summarize(candidates:Candidate[],score:(c:Candidate)=>number):string{
  const nav=candidates.filter(c=>c.nav).slice(0,TOP_N_NAV);
  const buttons=candidates.filter(c=>!c.nav&&c.kind==="button")
-  .map(c=>({c,r:byRelevance(c)})).sort((a,b)=>b.r-a.r).slice(0,TOP_N_BUTTON).map(x=>x.c);
+  .map(c=>({c,r:score(c)})).sort((a,b)=>b.r-a.r).slice(0,TOP_N_BUTTON).map(x=>x.c);
  const links=candidates.filter(c=>!c.nav&&c.kind!=="button")
-  .map(c=>({c,r:byRelevance(c)})).sort((a,b)=>b.r-a.r).slice(0,TOP_N_LINK).map(x=>x.c);
+  .map(c=>({c,r:score(c)})).sort((a,b)=>b.r-a.r).slice(0,TOP_N_LINK).map(x=>x.c);
  const picked=[...nav,...buttons,...links].filter((c,i,arr)=>arr.findIndex(x=>x.text===c.text&&x.url===c.url)===i);
  return picked.map((c,i)=>`${i+1}. [${c.kind}${c.nav?"/nav":""}] "${c.text.slice(0,80)}"${c.url?` -> ${c.url}`:""}`).join("\n")||"(none)";
 }
@@ -188,6 +187,16 @@ export async function resolve(stagehand:any,page:any,instruction:string,maxSteps
   // iteration since the candidate pool changes as we navigate. Falls back to uniform
   // weighting automatically when there's nothing yet to learn from (see computeTokenWeights).
   const tokenWeights=computeTokenWeights(instructionTokens,freshCandidates.map(c=>c.text));
+  // Both summarize() (building the prompt) and the mechanical fallback (sorting the same
+  // freshCandidates by the same relevance) run in the same iteration whenever observe()
+  // fails or gets rejected - caching per-candidate scores here means each candidate's
+  // relevance is computed once per iteration, not twice.
+  const relevanceCache=new Map<Candidate,number>();
+  const scoreCandidate=(c:Candidate):number=>{
+   let v=relevanceCache.get(c);
+   if(v===undefined){v=relevanceRatioTokens(c.text,instructionTokens,tokenWeights);relevanceCache.set(c,v);}
+   return v;
+  };
 
   const beforeFiles=await snapshotDownloads();
   let acted=false;
@@ -202,7 +211,7 @@ Prior actions this session (most recent last; the elements below are already exc
 ${recap(history)}${rejectedPicks.length?`\n\nAlready rejected this session (not real progress - don't re-suggest these): ${rejectedPicks.slice(-5).join("; ")}`:""}
 
 Page candidates:
-${summarize(freshCandidates,instructionTokens,tokenWeights)}
+${summarize(freshCandidates,scoreCandidate)}
 
 Next action:
 - If any filters were already set in prior actions above (a category/date/etc. was picked, most recent last) but no search/submit button has been clicked yet, that flow is INCOMPLETE - pick the next unset filter, or the submit/search button, even if a matching-looking result link is also visible. A link that only coincidentally shares words with the goal (e.g. from a "popular/featured" list, not the actual filtered results) can be the wrong item entirely - finishing and submitting the filters first gets the genuinely matching result.
@@ -270,7 +279,7 @@ Never pick actions that log out, delete, purchase, subscribe, or otherwise make 
    // subject buttons for unrelated values), and raw-order selection picks the wrong one first.
    // Uses clickFast() only (never the LLM self-heal fallback) so this path stays free even
    // once the budget is spent.
-   const byRelevance=[...freshCandidates].sort((a,b)=>relevanceRatioTokens(b.text,instructionTokens,tokenWeights)-relevanceRatioTokens(a.text,instructionTokens,tokenWeights));
+   const byRelevance=[...freshCandidates].sort((a,b)=>scoreCandidate(b)-scoreCandidate(a));
    const action=byRelevance.find(c=>!c.nav&&(c.kind==="button"||c.kind==="link"))
     ||byRelevance.find(c=>c.kind==="button"||c.kind==="link");
    if(!action)break;
