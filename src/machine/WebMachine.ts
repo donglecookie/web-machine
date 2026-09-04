@@ -11,16 +11,21 @@ export function withRelevanceCheck(result:any,instruction:string):any{
  const path=result.path||result.url||"";
  // A CDN often serves the actual file at an opaque, coded URL (e.g. EBSI's
  // "s_samun_mun_A1AT6KCF.pdf") that carries no readable information about what it is - the
- // saved filename inherits that same opacity. The action that led here usually still has the
- // original descriptive label though (e.g. the link text "...사회·문화_문제지.pdf 원본 열기"
- // before its href was followed), so check that too and take whichever score is higher,
- // rather than only ever judging by a filename that was never meant to be human-readable.
- const historyText=result.history?.[result.history.length-1]?.action?.text||"";
+ // saved filename inherits that same opacity. The actions that led here usually still have
+ // the original descriptive label somewhere though (e.g. the link text
+ // "...사회·문화_문제지.pdf 원본 열기" before its href was followed) - but not necessarily in
+ // the VERY LAST action: a native-download trigger (e.g. clicking "받기") is itself
+ // undescriptive, while the actually-descriptive exam-name click can be a step or two
+ // earlier. Checking a short recent window, not just the final entry, covers both shapes.
+ const recentTexts:string[]=(result.history||[]).slice(-3).map((h:any)=>h.action?.text).filter(Boolean);
  const pathRelevance=relevanceRatio(path,instruction);
- const textRelevance=historyText?relevanceRatio(historyText,instruction):0;
- const relevance=Math.max(pathRelevance,textRelevance);
+ const bestText=recentTexts.reduce((best,t)=>{
+  const r=relevanceRatio(t,instruction);
+  return r>best.r?{text:t,r}:best;
+ },{text:"",r:0});
+ const relevance=Math.max(pathRelevance,bestText.r);
  if(relevance<RELEVANCE_WARN_THRESHOLD){
-  const evidence=textRelevance>pathRelevance?`"${historyText}" (path "${path}" itself is not descriptive)`:`"${path}"`;
+  const evidence=bestText.r>pathRelevance?`"${bestText.text}" (path "${path}" itself is not descriptive)`:`"${path}"`;
   return{...result,warning:`Downloaded file may not match the request (relevance ${(relevance*100).toFixed(0)}% - verify manually): ${evidence}`};
  }
  return result;

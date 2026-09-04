@@ -107,7 +107,6 @@ export type OpenAICompatibleClientOptions={apiKey:string;model:string;baseURL:st
 // endpoint (OpenRouter, a self-hosted server, etc.) - baseURL is required rather than
 // defaulting to any one vendor, so this adapter stays provider-agnostic on its own terms.
 export function createOpenAICompatibleClient(opts:OpenAICompatibleClientOptions){
- const baseURL=opts.baseURL;
  return{
   async generate(input:StagehandRequest,signal?:AbortSignal):Promise<StagehandResponse>{
    const wantsJsonSchema=input.responseFormat?.type==="json_schema";
@@ -123,7 +122,7 @@ export function createOpenAICompatibleClient(opts:OpenAICompatibleClientOptions)
     const tools=toOpenAITools(input.tools);
     if(tools){body.tools=tools;if(input.toolChoice?.mode)body.tool_choice=input.toolChoice.mode;}
    }
-   const res=await fetch(`${baseURL}/chat/completions`,{
+   const res=await fetch(`${opts.baseURL}/chat/completions`,{
     method:"POST",
     headers:{"Content-Type":"application/json",Authorization:`Bearer ${opts.apiKey}`,...opts.headers},
     body:JSON.stringify(body),
