@@ -259,20 +259,20 @@ export async function resolve(stagehand:any,page:any,instruction:string,maxSteps
     budget.llmCalls++;
     const obs=await stagehand.observe(`Goal: find "${instruction}".
 
-Prior actions this session (most recent last; the elements below are already excluded from the candidate list so you can't pick them again). Use this to judge whether a filter flow is still in progress:
-${recap(history)}${rejectedPicks.length?`\n\nAlready rejected this session (not real progress - don't re-suggest these): ${rejectedPicks.slice(-5).join("; ")}`:""}
+Prior actions (excluded from candidates below; use to judge if a filter flow is still in progress):
+${recap(history)}${rejectedPicks.length?`\nAlready rejected, don't re-suggest: ${rejectedPicks.slice(-5).join("; ")}`:""}
 
 Page candidates:
 ${summarize(freshCandidates,scoreCandidate)}
 
 Next action:
-- If any filters were already set in prior actions above (a category/date/etc. was picked, most recent last) but no search/submit button has been clicked yet, that flow is INCOMPLETE - pick the next unset filter, or the submit/search button, even if a matching-looking result link is also visible. A link that only coincidentally shares words with the goal (e.g. from a "popular/featured" list, not the actual filtered results) can be the wrong item entirely - finishing and submitting the filters first gets the genuinely matching result.
-- Exact file link/button above (or elsewhere on page) -> pick it, once no filter flow is left incomplete.
-- Already-clicked submit/search with no new results -> find an actual result link instead.
-- Site search box visible and likely faster -> use it.
-- Else -> most specific relevant nav (category/date/article), not generic links.
-Only pick a genuinely clickable, interactive element (a real button or link) - never pick a heading, title, label, or other plain descriptive text just because it names the right thing; find the actual button/link near it instead.
-Never pick actions that log out, delete, purchase, subscribe, or otherwise make an irreversible/account-affecting change - only read/navigate/search actions.`,{page,timeout:CALL_TIMEOUT});
+- Filters set but not submitted yet -> finish filters or submit first, even if a tempting result link is visible (it may be from an unrelated list).
+- No filter flow pending -> pick the exact file link/button.
+- Already submitted with no new results -> pick an actual result link.
+- Search box visible and faster -> use it.
+- Else -> most specific nav, not generic links.
+Pick only real clickable buttons/links, never headings or labels.
+Never log out, delete, purchase, subscribe, or make other irreversible changes.`,{page,timeout:CALL_TIMEOUT});
     const next=obs?.data?.[0];
     const nextTarget=next?.selector?await resolveTarget(next.selector):null;
     const nextText=next?.description||"";

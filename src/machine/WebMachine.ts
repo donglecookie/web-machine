@@ -1,4 +1,4 @@
-import {resolve,newBudget,Budget} from "../files/resolver.js";import {download} from "../files/download.js";import {verify} from "../verification/file.js";import {HtmlMachine} from "./HtmlMachine.js";import {relevanceRatio,detectFileType} from "../discovery/patterns.js";
+import {resolve,newBudget,Budget} from "../files/resolver.js";import {download} from "../files/download.js";import {verify} from "../verification/file.js";import {HtmlMachine} from "./HtmlMachine.js";import {tokenize,relevanceRatioTokens,detectFileType} from "../discovery/patterns.js";
 const BLOCKED_DOMAINS=[
  "googlesyndication.com","doubleclick.net","google-analytics.com","googletagmanager.com",
  "adtrafficquality.google","fundingchoicesmessages.google.com","googleadservices.com",
@@ -18,9 +18,10 @@ export function withRelevanceCheck(result:any,instruction:string):any{
  // undescriptive, while the actually-descriptive exam-name click can be a step or two
  // earlier. Checking a short recent window, not just the final entry, covers both shapes.
  const recentTexts:string[]=(result.history||[]).slice(-3).map((h:any)=>h.action?.text).filter(Boolean);
- const pathRelevance=relevanceRatio(path,instruction);
+ const instructionTokens=tokenize(instruction); // instruction is the same across every check below - tokenize once, not per call
+ const pathRelevance=relevanceRatioTokens(path,instructionTokens);
  const bestText=recentTexts.reduce((best,t)=>{
-  const r=relevanceRatio(t,instruction);
+  const r=relevanceRatioTokens(t,instructionTokens);
   return r>best.r?{text:t,r}:best;
  },{text:"",r:0});
  const relevance=Math.max(pathRelevance,bestText.r);
