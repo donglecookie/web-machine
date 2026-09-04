@@ -2,7 +2,7 @@ import {Stagehand, localBrowser} from "@browserbasehq/stagehand";
 import {chromium} from "playwright";
 import path from "node:path";
 import {createOpenAICompatibleClient} from "./openaiCompatibleClient.js";
-const API_KEY_ENV_VARS=["GROQ_API_KEY","GOOGLE_GENERATIVE_AI_API_KEY","OPENAI_API_KEY","ANTHROPIC_API_KEY"];
+const PROVIDER_API_KEY_ENV_VAR:Record<string,string>={groq:"GROQ_API_KEY",google:"GOOGLE_GENERATIVE_AI_API_KEY",openai:"OPENAI_API_KEY",anthropic:"ANTHROPIC_API_KEY",cerebras:"CEREBRAS_API_KEY"};
 export async function createStagehand(){
  // Stagehand's model field only accepts a whitelisted set of providers (openai/anthropic/
  // google/groq/cerebras) - anything else (OpenRouter, a self-hosted OpenAI-compatible server,
@@ -25,7 +25,12 @@ export async function createStagehand(){
  }
 
  const model=process.env.STAGEHAND_MODEL||"groq/openai/gpt-oss-120b";
- const apiKey=API_KEY_ENV_VARS.map(k=>process.env[k]).find(Boolean);
+ // Match the API key to the provider the model string actually specifies, rather than
+ // grabbing whichever provider's key happens to exist first in a fixed-order list - otherwise
+ // switching STAGEHAND_MODEL to a different provider while an old key from a previous
+ // provider is still sitting in .env silently sends the WRONG key to the new provider.
+ const provider=model.split("/")[0];
+ const apiKey=process.env[PROVIDER_API_KEY_ENV_VAR[provider]||""];
  const modelConfig:any={modelName:model};
  if(apiKey)modelConfig.apiKey=apiKey;
  return Stagehand.create({browser,model:modelConfig,logging:{level:"info"}});
