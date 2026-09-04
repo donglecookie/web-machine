@@ -8,14 +8,17 @@ export async function createStagehand(){
  const launch:any={headless:true,acceptDownloads:true,downloadsPath:path.resolve("downloads"),args:["--no-sandbox","--disable-setuid-sandbox","--disable-dev-shm-usage","--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"],executablePath};
  const browser=await localBrowser.launch(launch);
 
- // OpenRouter (or any other OpenAI-compatible endpoint) isn't in Stagehand's built-in
- // provider whitelist (openai/anthropic/google/groq/cerebras only), so it needs the
- // translation adapter in openaiCompatibleClient.ts to work at all. Opt-in via
- // OPENROUTER_API_KEY; falls back to the normal built-in-provider path otherwise.
- const openRouterKey=process.env.OPENROUTER_API_KEY;
- if(openRouterKey){
-  const model=process.env.OPENROUTER_MODEL||"openai/gpt-4o-mini";
-  return Stagehand.create({browser,model:createOpenAICompatibleClient({apiKey:openRouterKey,model}),logging:{level:"info"}});
+ // Stagehand's model field only accepts a whitelisted set of providers (openai/anthropic/
+ // google/groq/cerebras) - anything else (OpenRouter, a self-hosted OpenAI-compatible server,
+ // etc.) needs the translation adapter in openaiCompatibleClient.ts. This path is provider-
+ // agnostic on purpose: unlike a specific vendor's endpoint, an arbitrary OpenAI-compatible
+ // API has no sensible default baseURL or model to assume, so both must be given explicitly.
+ const compatApiKey=process.env.OPENAI_COMPATIBLE_API_KEY;
+ if(compatApiKey){
+  const baseURL=process.env.OPENAI_COMPATIBLE_BASE_URL;
+  const model=process.env.OPENAI_COMPATIBLE_MODEL;
+  if(!baseURL||!model)throw new Error("OPENAI_COMPATIBLE_API_KEY is set but OPENAI_COMPATIBLE_BASE_URL and/or OPENAI_COMPATIBLE_MODEL is missing - both are required since there's no default provider to assume for an arbitrary OpenAI-compatible endpoint.");
+  return Stagehand.create({browser,model:createOpenAICompatibleClient({apiKey:compatApiKey,baseURL,model}),logging:{level:"info"}});
  }
 
  const model=process.env.STAGEHAND_MODEL||"groq/openai/gpt-oss-120b";

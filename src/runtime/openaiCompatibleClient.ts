@@ -3,11 +3,12 @@
 //   block (or array of blocks: text/image/tool_use/tool_result), and requests/responses come
 //   in TWO distinct shapes - a tool-calling shape (act/observe) and a structured-output shape
 //   with a required JSON schema (extract).
-// - OpenRouter's API (OpenAI-compatible): messages carry a flat string `content`, tool calls
-//   live in a separate `tool_calls` array, tool results are their own `role:"tool"` message,
-//   and structured output is requested via `response_format:{type:"json_schema",...}`.
-// This file translates in both directions so any OpenAI-compatible endpoint (OpenRouter here,
-// but the same adapter works for any other OpenAI-format provider) can act as a Stagehand model.
+// - The OpenAI Chat Completions protocol, used natively or compatibly by many providers
+//   (OpenRouter, self-hosted servers, etc.): messages carry a flat string `content`, tool
+//   calls live in a separate `tool_calls` array, tool results are their own `role:"tool"`
+//   message, and structured output is requested via `response_format:{type:"json_schema",...}`.
+// This file translates in both directions so any OpenAI-compatible endpoint can act as a
+// Stagehand model - it doesn't assume or default to any one provider.
 
 type Block=
  |{type:"text";text:string}
@@ -100,13 +101,13 @@ export function fromOpenAIChoiceJsonSchema(choice:any,usage:any):StagehandRespon
  };
 }
 
-export type OpenAICompatibleClientOptions={apiKey:string;model:string;baseURL?:string;headers?:Record<string,string>};
+export type OpenAICompatibleClientOptions={apiKey:string;model:string;baseURL:string;headers?:Record<string,string>};
 
 // Builds a Stagehand ClientLLM ({generate}) backed by any OpenAI-compatible chat completions
-// endpoint. Defaults to OpenRouter's endpoint; pass baseURL to point at a different compatible
-// provider (self-hosted, Azure, etc.) without touching the translation logic above.
+// endpoint (OpenRouter, a self-hosted server, etc.) - baseURL is required rather than
+// defaulting to any one vendor, so this adapter stays provider-agnostic on its own terms.
 export function createOpenAICompatibleClient(opts:OpenAICompatibleClientOptions){
- const baseURL=opts.baseURL||"https://openrouter.ai/api/v1";
+ const baseURL=opts.baseURL;
  return{
   async generate(input:StagehandRequest,signal?:AbortSignal):Promise<StagehandResponse>{
    const wantsJsonSchema=input.responseFormat?.type==="json_schema";

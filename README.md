@@ -33,16 +33,17 @@ STAGEHAND_MODEL=openai/gpt-4o-mini
 STAGEHAND_MODEL=anthropic/claude-sonnet-4-6
 ```
 
-### OpenRouter(또는 다른 OpenAI 호환 엔드포인트) 사용
+### OpenAI 호환 엔드포인트(OpenRouter, 자체 호스팅 서버 등) 사용
 
-Stagehand는 OpenRouter를 네이티브로 지원하지 않아서(허용된 프로바이더는 openai/anthropic/google/groq/cerebras뿐), `src/runtime/openaiCompatibleClient.ts`가 Stagehand의 내부 메시지 프로토콜(Anthropic/MCP 스타일 콘텐츠 블록)과 OpenAI 호환 프로토콜(평문 `content` + 별도 `tool_calls`) 사이를 통역하는 어댑터 역할을 합니다. `.env`에 다음을 설정하면 됩니다(설정 시 `STAGEHAND_MODEL`/`GROQ_API_KEY`보다 우선 적용):
+Stagehand는 openai/anthropic/google/groq/cerebras 5개 프로바이더만 네이티브로 지원해서, 그 외(OpenRouter, 자체 호스팅 서버 등)를 쓰려면 `src/runtime/openaiCompatibleClient.ts`가 Stagehand의 내부 메시지 프로토콜(Anthropic/MCP 스타일 콘텐츠 블록)과 OpenAI 호환 프로토콜(평문 `content` + 별도 `tool_calls`) 사이를 통역하는 어댑터 역할을 합니다. 특정 프로바이더에 종속되지 않도록 세 값(API 키/주소/모델)을 모두 직접 지정해야 합니다. `.env`에 다음을 설정하면 됩니다(설정 시 `STAGEHAND_MODEL`/`GROQ_API_KEY`보다 우선 적용):
 
 ```
-OPENROUTER_API_KEY=your_openrouter_api_key
-OPENROUTER_MODEL=openai/gpt-4o-mini
+OPENAI_COMPATIBLE_API_KEY=your_api_key
+OPENAI_COMPATIBLE_BASE_URL=https://openrouter.ai/api/v1
+OPENAI_COMPATIBLE_MODEL=openai/gpt-4o-mini
 ```
 
-이 어댑터는 OpenRouter뿐 아니라 OpenAI 호환 API를 제공하는 어떤 엔드포인트와도 동작합니다(`createOpenAICompatibleClient({apiKey, model, baseURL})`의 `baseURL`을 바꾸면 됩니다).
+(위 예시는 OpenRouter 기준입니다. `OPENAI_COMPATIBLE_BASE_URL`을 바꾸면 OpenAI 호환 API를 제공하는 어떤 엔드포인트와도 동작합니다.)
 
 ## 탐색 전략
 
