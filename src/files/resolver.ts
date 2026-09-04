@@ -19,6 +19,66 @@ const RECAP_STEPS=8;
 const DOWNLOADS_DIR="downloads";
 const DEFAULT_MAX_LLM_CALLS=20;
 
+// Structural/layout containers (page regions, headings) are never legitimate click targets,
+// regardless of filter-flow state - clicking one does nothing. Seen repeatedly in practice:
+// the model sometimes picks one of these instead of the actual button/link sitting inside or
+// near it (e.g. a <header> instead of the "받기" button it contains).
+const NON_INTERACTIVE_TAGS=new Set(["HEADER","MAIN","NAV","SECTION","ARTICLE","ASIDE","FOOTER","H1","H2","H3","H4","H5","H6"]);
+
+// A prose instruction alone ("finish the filter flow before clicking a result link") isn't
+// reliable - LLMs sometimes ignore it and grab a keyword-matching-but-wrong-date link from an
+// unrelated "popular/featured" list anyway (seen repeatedly in practice). If recent actions
+// look like filter/category picks (button clicks, not a submit action) but nothing matching
+// search/submit intent has happened yet, the flow is incomplete. Pure function over history
+// alone, independently testable without any browser/page dependency.
+export function isFilterFlowIncomplete(history:any[]):boolean{
+ const hasPickedFilter=history.some(h=>h.action?.kind==="button"&&!h.action?.nav&&!SUBMIT_INTENT_RE.test(h.action?.text||""));
+ const hasSubmitted=history.some(h=>SUBMIT_INTENT_RE.test(h.action?.text||""));
+ return hasPickedFilter&&!hasSubmitted;
+}
+
+export type PickEvaluation={reject:boolean;reason?:string;isLink:boolean};
+
+// Decides whether an observe() pick should be honored or rejected, and why. Deliberately pure
+// (plain data in, plain data out, no page/stagehand/selector-resolution inside) so this - the
+// actual policy the whole reject/fallback mechanism hinges on - can be unit tested directly
+// with plain objects, rather than only ever exercised indirectly through a real browser run.
+export function evaluatePick(params:{
+ tag:string|null;
+ isInsideLink:boolean;
+ description:string;
+ filterFlowIncomplete:boolean;
+ currentPageHasDownloadIntent:boolean;
+ relevance:number;
+}):PickEvaluation{
+ const isLink=params.tag==="A"||params.isInsideLink;
+ const isNonInteractive=Boolean(params.tag&&NON_INTERACTIVE_TAGS.has(params.tag));
+ const isReset=RESET_INTENT_RE.test(params.description);
+ const isDestructive=DESTRUCTIVE_INTENT_RE.test(params.description);
+ const looksLikeDownload=KEYWORD_RE.test(params.description);
+ const isDistraction=params.currentPageHasDownloadIntent&&isLink&&!looksLikeDownload&&params.relevance===0;
+ const reject=(params.filterFlowIncomplete&&isLink)||isNonInteractive||isReset||isDestructive||isDistraction;
+ if(!reject)return{reject:false,isLink};
+ const reason=isDestructive?"looks like a destructive/irreversible action (log out, delete, purchase, etc.)"
+  :isReset?"looks like a reset/clear action that would undo progress"
+  :isNonInteractive?`resolves to a non-interactive layout element (<${params.tag}>)`
+  :isDistraction?`navigates away to an unrelated page (relevance ${(params.relevance*100).toFixed(0)}%) while a download button is already visible on the current page`
+  :`resolves to a link (${params.tag==="A"?"<a>":`<${params.tag}> inside an <a>`}) while a filter flow looks incomplete`;
+ return{reject:true,reason,isLink};
+}
+
+// The judgment-free mechanical fallback's candidate choice: prefer non-nav (content/filter)
+// candidates over generic chrome (menu/home links) - with no LLM guidance, blindly clicking a
+// nav link is far more likely to reset/reload the page (losing any expanded filter state)
+// than to make real progress - and rank by relevance to the instruction first rather than raw
+// DOM order (a genuinely matching filter/result can sit later in the DOM than several
+// irrelevant ones, and raw-order selection would pick the wrong one first).
+export function pickFallbackCandidate(candidates:Candidate[],score:(c:Candidate)=>number):Candidate|undefined{
+ const byRelevance=[...candidates].sort((a,b)=>score(b)-score(a));
+ return byRelevance.find(c=>!c.nav&&(c.kind==="button"||c.kind==="link"))
+  ||byRelevance.find(c=>c.kind==="button"||c.kind==="link");
+}
+
 // A per-run cap on actual LLM calls (observe + act), independent of maxSteps. maxSteps alone
 // doesn't bound cost: a single "step" can trigger an observe() plus one or two act() calls
 // (self-heal fallback, search-box typing). Passing one Budget across multiple resolve() calls
@@ -136,11 +196,6 @@ export async function resolve(stagehand:any,page:any,instruction:string,maxSteps
    })()`);
   }catch{return null;}
  }
- // Structural/layout containers (page regions, headings) are never legitimate click targets,
- // regardless of filter-flow state - clicking one does nothing. Seen repeatedly in practice:
- // the model sometimes picks one of these instead of the actual button/link sitting inside or
- // near it (e.g. a <header> instead of the "받기" button it contains).
- const NON_INTERACTIVE_TAGS=new Set(["HEADER","MAIN","NAV","SECTION","ARTICLE","ASIDE","FOOTER","H1","H2","H3","H4","H5","H6"]);
 
  for(let i=0;i<maxSteps;i++){
   const url=await page.url().catch(()=>history[history.length-1]?.url||"");
@@ -170,15 +225,12 @@ export async function resolve(stagehand:any,page:any,instruction:string,maxSteps
 
   // A prose instruction alone ("finish the filter flow before clicking a result link") isn't
   // reliable - LLMs sometimes ignore it and grab a keyword-matching-but-wrong-date link from
-  // an unrelated "popular/featured" list anyway (seen repeatedly in practice). If recent
-  // actions look like filter/category picks (short button-style labels, not a submit action)
-  // but nothing matching search/submit intent has happened yet, treat the flow as incomplete
-  // and reject any observe() pick that resolves to a real <a> link (checked directly below,
-  // not by matching against our candidate list - selector formats differ and can't be
-  // string-matched) - only filter buttons and the eventual submit button stay selectable.
-  const hasPickedFilter=history.some(h=>h.action?.kind==="button"&&!h.action?.nav&&!SUBMIT_INTENT_RE.test(h.action?.text||""));
-  const hasSubmitted=history.some(h=>SUBMIT_INTENT_RE.test(h.action?.text||""));
-  const filterFlowIncomplete=hasPickedFilter&&!hasSubmitted;
+  // an unrelated "popular/featured" list anyway (seen repeatedly in practice). When the flow
+  // looks incomplete (see isFilterFlowIncomplete), reject any observe() pick that resolves to
+  // a real link (checked directly below, not by matching against our candidate list - selector
+  // formats differ and can't be string-matched) - only filter buttons and the eventual submit
+  // button stay selectable.
+  const filterFlowIncomplete=isFilterFlowIncomplete(history);
   let freshCandidates=candidates.filter(c=>!(c.selector&&clicked.has(c.selector))&&!RESET_INTENT_RE.test(c.text));
   if(filterFlowIncomplete)freshCandidates=freshCandidates.filter(c=>c.kind!=="link");
 
@@ -223,34 +275,29 @@ Only pick a genuinely clickable, interactive element (a real button or link) - n
 Never pick actions that log out, delete, purchase, subscribe, or otherwise make an irreversible/account-affecting change - only read/navigate/search actions.`,{page,timeout:CALL_TIMEOUT});
     const next=obs?.data?.[0];
     const nextTarget=next?.selector?await resolveTarget(next.selector):null;
-    const nextTag=nextTarget?.tagName??null;
-    const nextIsLink=nextTag==="A"||Boolean(nextTarget?.isInsideLink);
-    const nextIsNonInteractive=Boolean(nextTag&&NON_INTERACTIVE_TAGS.has(nextTag));
     const nextText=next?.description||"";
-    const nextIsReset=RESET_INTENT_RE.test(nextText);
-    const nextIsDestructive=DESTRUCTIVE_INTENT_RE.test(nextText);
-    const nextLooksLikeDownload=KEYWORD_RE.test(nextText);
     const nextRelevance=relevanceRatioTokens(nextText,instructionTokens,tokenWeights);
-    const nextIsDistraction=currentPageHasDownloadIntent&&nextIsLink&&!nextLooksLikeDownload&&nextRelevance===0;
-    const rejectPick=(filterFlowIncomplete&&nextIsLink)||nextIsNonInteractive||nextIsReset||nextIsDestructive||nextIsDistraction;
-    if(next?.selector&&!rejectPick&&await click(next.selector,`Click "${next.description}".`)){
+    const evaluation=evaluatePick({
+     tag:nextTarget?.tagName??null,
+     isInsideLink:Boolean(nextTarget?.isInsideLink),
+     description:nextText,
+     filterFlowIncomplete,
+     currentPageHasDownloadIntent,
+     relevance:nextRelevance
+    });
+    if(next?.selector&&!evaluation.reject&&await click(next.selector,`Click "${next.description}".`)){
      selector=next.selector;
      actionText=next.description||"";
-     history.push({url,action:{kind:nextIsLink?"link":"button",text:next.description,selector:next.selector}});
+     history.push({url,action:{kind:evaluation.isLink?"link":"button",text:next.description,selector:next.selector}});
      if(/search|검색/i.test(next.description)){
       await page.waitForTimeout(300);
       await act(`Type "${instruction}" into the search input field and press Enter to submit the search.`);
       await page.waitForTimeout(1000);
      }
      acted=true;
-    }else if(rejectPick){
-     const reason=nextIsDestructive?"looks like a destructive/irreversible action (log out, delete, purchase, etc.)"
-      :nextIsReset?"looks like a reset/clear action that would undo progress"
-      :nextIsNonInteractive?`resolves to a non-interactive layout element (<${nextTag}>)`
-      :nextIsDistraction?`navigates away to an unrelated page (relevance ${(nextRelevance*100).toFixed(0)}%) while a download button is already visible on the current page`
-      :`resolves to a link (${nextTag==="A"?"<a>":`<${nextTag}> inside an <a>`}) while a filter flow looks incomplete`;
+    }else if(evaluation.reject){
      rejectedPicks.push(nextText);
-     console.error(`resolve: rejected observe() pick "${next.description}" - it ${reason}; falling back to mechanical selection.`);
+     console.error(`resolve: rejected observe() pick "${next.description}" - it ${evaluation.reason}; falling back to mechanical selection.`);
     }
    }catch(e){
     const msg=e instanceof Error?e.message:String(e);
@@ -270,18 +317,9 @@ Never pick actions that log out, delete, purchase, subscribe, or otherwise make 
   }
 
   if(!acted){
-   // Prefer non-nav (content/filter) candidates over generic chrome (menu/home links): with
-   // no LLM guidance, blindly clicking a nav link is far more likely to reset/reload the page
-   // (losing any expanded filter state) than to make real progress. Also rank by relevance to
-   // the instruction first (same scoring summarize() already uses for the prompt text) rather
-   // than raw DOM order - seen in practice: a genuinely matching filter/result (e.g. a
-   // "사회·문화 문제지" button) can sit later in the DOM than several irrelevant ones (grade/
-   // subject buttons for unrelated values), and raw-order selection picks the wrong one first.
-   // Uses clickFast() only (never the LLM self-heal fallback) so this path stays free even
-   // once the budget is spent.
-   const byRelevance=[...freshCandidates].sort((a,b)=>scoreCandidate(b)-scoreCandidate(a));
-   const action=byRelevance.find(c=>!c.nav&&(c.kind==="button"||c.kind==="link"))
-    ||byRelevance.find(c=>c.kind==="button"||c.kind==="link");
+   // clickFast() only (never the LLM self-heal fallback) so this path stays free even once
+   // the budget is spent. See pickFallbackCandidate for the selection policy itself.
+   const action=pickFallbackCandidate(freshCandidates,scoreCandidate);
    if(!action)break;
    selector=action.selector;
    actionText=action.text||"";
