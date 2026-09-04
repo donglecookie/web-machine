@@ -147,7 +147,7 @@ export async function resolve(stagehand:any,page:any,instruction:string,maxSteps
   const resolvedCurrentUrl=resolveFileUrl(url,fileType);
   if(resolvedCurrentUrl)return{ok:true,url:resolvedCurrentUrl,history};
 
-  const candidates=await inspect(page,fileType).catch(()=>[]);
+  const candidates=await inspect(page,fileType,instructionTokens).catch(()=>[]);
   const direct=candidates.find(c=>c.url&&resolveFileUrl(c.url,fileType))
    ||candidates.find(c=>c.url&&sameHost(c.url,url)&&!isSamePageHash(c.url,url)&&KEYWORD_RE.test(c.text));
   if(direct?.url){const resolvedUrl=resolveFileUrl(direct.url,fileType)||direct.url;history.push({url,action:direct});return{ok:true,url:resolvedUrl,history};}

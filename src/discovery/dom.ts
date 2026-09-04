@@ -1,4 +1,4 @@
-import {KEYWORD_RE,FileType,ANY_FILE_TYPE} from "./patterns.js";
+import {KEYWORD_RE,FileType,ANY_FILE_TYPE,relevanceRatioTokens} from "./patterns.js";
 export type Candidate={kind:string;text:string;url?:string;selector?:string;score:number;nav:boolean};
 const EVAL_SOURCE=`(() => {
   const a = [];
@@ -43,13 +43,28 @@ const EVAL_SOURCE=`(() => {
   return a;
 })()`;
 const MAX_CANDIDATES=60;
-export async function inspect(page:any,fileType:FileType=ANY_FILE_TYPE):Promise<Candidate[]>{
+export async function inspect(page:any,fileType:FileType=ANY_FILE_TYPE,instructionTokens:string[]=[]):Promise<Candidate[]>{
  const xs=await page.evaluate(EVAL_SOURCE);
- // This is a coarse initial ranking only - genuine relevance-to-instruction ranking happens
- // later via relevanceRatio in resolver.ts. Here we just want a reasonable starting order and
- // a signal for the zero-LLM mechanical fallback, so the boost stays generic (download intent
- // + the requested file type's own extension), not tied to any particular site or subject.
- const scored=xs.map((x:any)=>{const s=x.text.toLowerCase();let score=0;if(KEYWORD_RE.test(s)||fileType.aliases.some(a=>s.includes(a.toLowerCase())))score+=60;if(x.kind==="download")score+=40;if(fileType.extRe.test(x.url||""))score+=100;return{...x,score};});
+ // This is a coarse initial ranking only - genuine relevance-to-instruction ranking (fuzzy
+ // matching + candidate-pool-based token weighting) happens later in resolver.ts, once the
+ // full candidate list for a step is known. But without ANY instruction-awareness here, a
+ // page with many same-shaped candidates (e.g. one filter/문제지/정답지/해설지 button group
+ // per subject, times dozens of subjects) can genuinely exceed MAX_CANDIDATES before it even
+ // reaches resolver.ts - and since none of those buttons match the generic KEYWORD_RE (no
+ // literal "download"/"받기" text), they all tie at score 0, so the ACTUAL target subject can
+ // get truncated away by nothing more than raw DOM order, before any relevance sorting
+ // downstream gets a chance to save it. A modest instruction-relevance boost here (unweighted
+ // - there's no full candidate pool yet to compute token weights from) is enough to keep a
+ // genuinely matching candidate alive into the pool that resolver.ts actually sees.
+ const scored=xs.map((x:any)=>{
+  const s=x.text.toLowerCase();
+  let score=0;
+  if(KEYWORD_RE.test(s)||fileType.aliases.some(a=>s.includes(a.toLowerCase())))score+=60;
+  if(x.kind==="download")score+=40;
+  if(fileType.extRe.test(x.url||""))score+=100;
+  if(instructionTokens.length)score+=relevanceRatioTokens(x.text,instructionTokens)*200;
+  return{...x,score};
+ });
  const seen=new Set<string>();
  // Include the selector in the de-dup key: several genuinely distinct elements (e.g. three
  // separate "다운로드" buttons under different tabs) can share identical text/kind/url, and
