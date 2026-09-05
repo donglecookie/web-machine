@@ -282,8 +282,7 @@ export async function resolve(stagehand:any,page:any,instruction:string,maxSteps
   let actionText="";
   if(budget.llmCalls<budget.maxLlmCalls){
    try{
-    budget.llmCalls++;
-    const obs=await stagehand.observe(`Goal: find "${instruction}".
+    const promptText=`Goal: find "${instruction}".
 
 Prior actions (excluded from candidates below; use to judge if a filter flow is still in progress):
 ${recap(history)}${rejectedPicks.length?`\nAlready rejected, don't re-suggest: ${rejectedPicks.slice(-5).join("; ")}`:""}
@@ -298,7 +297,21 @@ Next action:
 - Search box visible and faster -> use it.
 - Else -> most specific nav, not generic links.
 Pick only real clickable buttons/links, never headings or labels.
-Never log out, delete, purchase, subscribe, or make other irreversible changes.`,{page,timeout:CALL_TIMEOUT});
+Never log out, delete, purchase, subscribe, or make other irreversible changes.`;
+    // Scoping observe() to the page's main content area, when one exists, cuts the
+    // accessibility-tree snapshot Stagehand builds internally down to just that container
+    // instead of the whole page (including header/nav/footer chrome we never care about) -
+    // documented to cut token usage by up to 10x, and this internal snapshot (not our own
+    // prompt text above, already trimmed earlier) is what's actually been driving the
+    // oversized-request failures seen repeatedly against small-TPM providers. Falls back to
+    // an unscoped call (one extra LLM call, only in this case) if "main" doesn't exist on
+    // this page or happens to miss the real candidates.
+    budget.llmCalls++;
+    let obs=await stagehand.observe(promptText,{page,timeout:CALL_TIMEOUT,locator:"main"}).catch(()=>null);
+    if(!obs?.data?.length){
+     budget.llmCalls++;
+     obs=await stagehand.observe(promptText,{page,timeout:CALL_TIMEOUT});
+    }
     const next=obs?.data?.[0];
     const nextTarget=next?.selector?await resolveTarget(next.selector):null;
     const nextText=next?.description||"";
