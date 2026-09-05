@@ -14,6 +14,7 @@ type FakeOpts={
  observeResults?:any[];      // consumed in order, one per observe() call
  observeErrors?:(string|null)[]; // if set at an index, observe() throws that message instead
  urls?:string[];             // page.url() sequence; last value repeats
+ hasMain?:boolean;           // whether page.locator("main").count() reports an element
 };
 
 function makeFakes(opts:FakeOpts={}){
@@ -24,7 +25,12 @@ function makeFakes(opts:FakeOpts={}){
  const page:any={
   url:async()=>urls[Math.min(urlIdx,urls.length-1)],
   goto:async()=>{urlIdx++;return true;},
-  locator:(sel:string)=>({__selector:sel,click:async()=>{},waitFor:async()=>{}}),
+  locator:(sel:string)=>({
+   __selector:sel,
+   click:async()=>{},
+   waitFor:async()=>{},
+   count:async()=>(sel==="main"?(opts.hasMain??true)?1:0:1),
+  }),
   waitForTimeout:async()=>{},
   // inspect() calls page.evaluate to scrape candidates; return them directly.
   evaluate:async()=>opts.candidates??[],
@@ -88,17 +94,28 @@ test("resolve passes cache:true and a page handle on every observe call (cache l
  }
 });
 
-test("resolve stops attempting the main-scoped observe after it comes back empty (regression: retrying a locator that can't resolve produced repeated CDP frame errors on main-less sites)", async () => {
+test("resolve never attempts the main-scoped observe on a page confirmed to have no <main> (regression: inferring this from an empty observe() result never actually fired - Stagehand's own internal fallback to the full DOM still returns real results, so a live run kept re-triggering, and re-erroring on, the scoped call every single step)", async () => {
  const {page,stagehand,observeCalls}=makeFakes({
   candidates:[
    {kind:"button",text:"사회문화 하나",selector:"b1",nav:false},
    {kind:"button",text:"사회문화 둘",selector:"b2",nav:false},
   ],
   observeResults:[{data:[]},{data:[]},{data:[]},{data:[]}],
+  hasMain:false,
  });
  await resolve(stagehand,page,"사회문화",3,newBudget(20));
  const scoped=observeCalls.filter(o=>o.locator);
- assert.equal(scoped.length,1,"main-scoped observe should be tried once, then abandoned for this run");
+ assert.equal(scoped.length,0,"a page with no <main> should never even attempt the scoped call");
+});
+
+test("resolve does attempt the main-scoped observe when the page actually has one", async () => {
+ const {page,stagehand,observeCalls}=makeFakes({
+  candidates:[{kind:"button",text:"사회문화",selector:"b1",nav:false}],
+  hasMain:true,
+ });
+ await resolve(stagehand,page,"사회문화",1,newBudget(5));
+ const scoped=observeCalls.filter(o=>o.locator);
+ assert.ok(scoped.length>0);
 });
 
 test("resolve treats a credits error as permanent: it stops calling observe() for the rest of the run rather than retrying a call certain to fail identically", async () => {

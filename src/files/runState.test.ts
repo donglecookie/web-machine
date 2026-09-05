@@ -2,8 +2,8 @@ import {test} from "node:test";
 import assert from "node:assert/strict";
 import {RunState,RECENT_REJECTS_SHOWN,newBudget,exhaustBudget} from "./runState.js";
 
-const mk=(o:Partial<{buttonCap:number;linkCap:number;mainScopeMissLimit:number}>={})=>
- new RunState({buttonCap:o.buttonCap??30,linkCap:o.linkCap??15,mainScopeMissLimit:o.mainScopeMissLimit??1});
+const mk=(o:Partial<{buttonCap:number;linkCap:number}>={})=>
+ new RunState({buttonCap:o.buttonCap??30,linkCap:o.linkCap??15});
 
 test("RunState starts with the caps it was constructed with", () => {
  const s=mk({buttonCap:30,linkCap:15});
@@ -15,21 +15,6 @@ test("RunState.shrinkCandidateCap halves caps and never goes below the floor no 
  for(let i=0;i<10;i++)s.shrinkCandidateCap();
  assert.equal(s.candidateCap.button,10);
  assert.equal(s.candidateCap.link,5);
-});
-
-test("RunState stops advising the main-scoped observe once misses reach the limit", () => {
- const s=mk({mainScopeMissLimit:1});
- assert.equal(s.shouldTryMainScope,true);
- s.recordMainScopeMiss();
- assert.equal(s.shouldTryMainScope,false,"a main-less site should not be retried all run");
-});
-
-test("RunState honors a higher main-scope miss limit when configured", () => {
- const s=mk({mainScopeMissLimit:2});
- s.recordMainScopeMiss();
- assert.equal(s.shouldTryMainScope,true);
- s.recordMainScopeMiss();
- assert.equal(s.shouldTryMainScope,false);
 });
 
 test("RunState.recentRejects keeps only the newest entries, so an old reject can't crowd out prompt budget forever", () => {

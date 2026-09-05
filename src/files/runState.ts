@@ -42,26 +42,13 @@ export function shrinkCandidateCap(cap:{button:number;link:number}):{button:numb
 export class RunState {
  /** Candidate caps for prompt size, shrunk adaptively if the provider rejects oversized requests. */
  candidateCap:{button:number;link:number};
- /** How many times the main-scoped observe found nothing; past the limit we stop trying it. */
- private mainScopeMisses=0;
- private readonly mainScopeMissLimit:number;
  /** Picks observe() proposed that policy rejected - surfaced back to the model so it doesn't re-propose them. */
  private readonly rejected:string[]=[];
  /** Ensures the "falling back to free heuristics" notice is logged once, not once per step. */
  private degradedNotice=false;
 
- constructor(opts:{buttonCap:number;linkCap:number;mainScopeMissLimit:number}){
+ constructor(opts:{buttonCap:number;linkCap:number}){
   this.candidateCap={button:opts.buttonCap,link:opts.linkCap};
-  this.mainScopeMissLimit=opts.mainScopeMissLimit;
- }
-
- /** True while the main-scoped observe is still worth attempting on this site. */
- get shouldTryMainScope():boolean{
-  return this.mainScopeMisses<this.mainScopeMissLimit;
- }
-
- recordMainScopeMiss():void{
-  this.mainScopeMisses++;
  }
 
  recordRejectedPick(description:string):void{

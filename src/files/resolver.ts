@@ -28,7 +28,6 @@ const TOP_N_BUTTON=30;
 const TOP_N_LINK=15;
 const RECAP_STEPS=8;
 const DOWNLOADS_DIR="downloads";
-const MAIN_SCOPE_MISS_LIMIT=1;
 // Soft ceiling for our own prompt text. Set well under the smallest provider limit seen in
 // practice (Groq's free tier at 8000 TPM) because our text is only PART of what gets sent -
 // Stagehand adds its own accessibility-tree snapshot of the page on top, and that portion is
@@ -192,7 +191,7 @@ export async function resolve(stagehand:Stagehand,page:Page,instruction:string,m
  // All per-run mutable bookkeeping (candidate caps, main-scope misses, rejected picks,
  // one-shot notices) lives in one object with its update rules, instead of several loose
  // `let`s whose rules were inlined at each use site across this function. See runState.ts.
- const state=new RunState({buttonCap:TOP_N_BUTTON,linkCap:TOP_N_LINK,mainScopeMissLimit:MAIN_SCOPE_MISS_LIMIT});
+ const state=new RunState({buttonCap:TOP_N_BUTTON,linkCap:TOP_N_LINK});
  // observe() already grounds a concrete selector, so execute it directly via the
  // Playwright-style Locator API (no LLM call) instead of re-asking the model what to do.
  // Only fall back to the LLM-driven act() (which re-reasons and self-heals) if the direct
@@ -361,25 +360,24 @@ Never log out, delete, purchase, subscribe, or make other irreversible changes.`
     const observeOpts=(extra:StagehandClientObserveOptions={}):StagehandClientObserveOptions=>
      ({page,timeout:CALL_TIMEOUT,cache:true,...(ignoreLocators.length?{ignoreLocators}:{}),...extra});
     budget.llmCalls++;
-    // Once locator:"main" has failed to narrow anything MAIN_SCOPE_MISS_LIMIT times, stop
-    // attempting it for the rest of this run: on a site with no <main> at all, every attempt
-    // still costs Stagehand a real frame/AX-tree resolution internally - which was observed to
-    // throw CDP errors ("Frame with the given frameId is not found") on this exact codepath
-    // once the page had navigated since the locator was last resolved. Set to 1, not 2: two
-    // separate real runs against the same main-less site both produced Stagehand's own
-    // "Unable to narrow scope with locator" warning on the very first attempt - that warning
-    // specifically means the locator itself couldn't resolve at all (not "resolved but empty
-    // for this particular query"), which is unambiguous enough evidence on its own that a
-    // second, deliberately-more-lenient chance wasn't actually buying any real safety margin,
-    // just an extra guaranteed-repeat error.
-    const tryMainScope=state.shouldTryMainScope;
-    // The scoped attempt swallows its error so an unusable locator can fall through to the
-    // unscoped retry - but NOT every error deserves that retry. A provider-level failure
-    // (exhausted credits, prompt already over the token ceiling) will fail identically on the
-    // retry, so re-raise those immediately and let the handler below react once, instead of
-    // silently spending a second doomed call on every single step.
+    // Whether "main" exists is checked DIRECTLY (a plain Playwright query, no LLM cost) rather
+    // than inferred from the observe() result - inference doesn't work here: Stagehand falls
+    // back to the full DOM internally whenever the locator can't narrow, and that fallback
+    // still returns real results, so "the scoped call came back empty" almost never actually
+    // happens even on a site with no <main> at all. The previous version of this check waited
+    // for that empty-result signal and it essentially never fired in practice - a live run
+    // kept re-attempting (and re-erroring on) the scoped call on every single step. Checking
+    // directly sidesteps needing to infer anything, and - just as importantly - means we never
+    // even trigger Stagehand's own frame/AX-tree resolution for a locator we already know
+    // can't resolve, which is what threw the CDP errors ("Frame with the given frameId is not
+    // found") in the first place.
+    const hasMain=await page.locator("main").count().then(n=>n>0).catch(()=>false);
     let obs=null;
-    if(tryMainScope){
+    if(hasMain){
+     // A provider-level failure (exhausted credits, prompt already over the token ceiling)
+     // will fail identically on the unscoped retry below too, so re-raise those immediately
+     // and let the handler further down react once, instead of silently spending a second
+     // doomed call on every single step.
      try{
       obs=await stagehand.observe(promptText,observeOpts({locator:page.locator("main")}));
      }catch(scopedErr){
@@ -387,7 +385,6 @@ Never log out, delete, purchase, subscribe, or make other irreversible changes.`
       if(kind!=="other")throw scopedErr;
       obs=null;
      }
-     if(!obs?.data?.length)state.recordMainScopeMiss();
     }
     if(!obs?.data?.length){
      budget.llmCalls++;
