@@ -18,7 +18,7 @@ const TOP_N_LINK=15;
 const RECAP_STEPS=8;
 const DOWNLOADS_DIR="downloads";
 const DEFAULT_MAX_LLM_CALLS=20;
-const MAIN_SCOPE_MISS_LIMIT=2;
+const MAIN_SCOPE_MISS_LIMIT=1;
 
 // Structural/layout containers (page regions, headings) are never legitimate click targets,
 // regardless of filter-flow state - clicking one does nothing. Seen repeatedly in practice:
@@ -335,13 +335,16 @@ Never log out, delete, purchase, subscribe, or make other irreversible changes.`
     const observeOpts=(extra:Record<string,unknown>)=>({page,timeout:CALL_TIMEOUT,...(ignoreLocators.length?{ignoreLocators}:{}),...extra});
     budget.llmCalls++;
     // Once locator:"main" has failed to narrow anything MAIN_SCOPE_MISS_LIMIT times, stop
-    // attempting it for the rest of this run: on a site with no <main> at all (confirmed by
-    // repeated identical misses), every attempt still costs Stagehand a real frame/AX-tree
-    // resolution internally - which was observed to throw CDP errors ("Frame with the given
-    // frameId is not found") on this exact codepath once the page had navigated since the
-    // locator was last resolved. Two misses (not one) gives one fair chance for a step where
-    // main genuinely exists but happens to be empty, before concluding the SCOPE itself - not
-    // just this step's content - doesn't apply here.
+    // attempting it for the rest of this run: on a site with no <main> at all, every attempt
+    // still costs Stagehand a real frame/AX-tree resolution internally - which was observed to
+    // throw CDP errors ("Frame with the given frameId is not found") on this exact codepath
+    // once the page had navigated since the locator was last resolved. Set to 1, not 2: two
+    // separate real runs against the same main-less site both produced Stagehand's own
+    // "Unable to narrow scope with locator" warning on the very first attempt - that warning
+    // specifically means the locator itself couldn't resolve at all (not "resolved but empty
+    // for this particular query"), which is unambiguous enough evidence on its own that a
+    // second, deliberately-more-lenient chance wasn't actually buying any real safety margin,
+    // just an extra guaranteed-repeat error.
     const tryMainScope=mainScopeMisses<MAIN_SCOPE_MISS_LIMIT;
     let obs=tryMainScope
      ?await stagehand.observe(promptText,observeOpts({locator:page.locator("main")})).catch(()=>null)
