@@ -120,14 +120,41 @@ export function resolveFileUrl(url:string,fileType:FileType=ANY_FILE_TYPE):strin
 // filename/URL. Also used (via relevanceRatioTokens) to rank page candidates by relevance to
 // the instruction instead of relying on a fixed, site-tuned candidate count.
 export function tokenize(s:string):string[]{
- return s.toLowerCase().split(/[\s,·\-–—/|_()]+/).map(t=>t.trim()).filter(t=>t.length>=2);
+ // Normalized here too, not just on the candidate side: folding synonyms on only one side
+ // would leave the two vocabularies mismatched and the mapping would never actually fire.
+ return normalizeForMatch(s.toLowerCase()).split(/[\s,·\-–—/|_()]+/).map(t=>t.trim()).filter(t=>t.length>=2);
 }
+
+// Interchangeable words that name the same thing, mapped to one canonical form before
+// comparing. This is the cheap, offline slice of "semantic" matching: embeddings would cover
+// far more (car/automobile), but would mean an API call per candidate on every step - and
+// this project's actual bottleneck all along has been token/rate limits, so adding per-
+// candidate API traffic would make the common case worse to fix a rare one. Measured against
+// real queries, the genuinely-needed cases here are format/wording variants like these, not
+// cross-language synonymy. It also keeps the zero-API fallback path working when credits run
+// out, which an embedding-based ranker could not.
+const SYNONYM_GROUPS:string[][]=[
+ ["사진","이미지","그림"],
+ ["문제지","문제"],
+ ["정답지","정답","답"],
+ ["해설지","해설"],
+ ["파일","자료","문서"],
+ ["photo","image","picture","pic"],
+ ["document","file","doc"],
+];
+const SYNONYM_CANONICAL=new Map<string,string>(
+ SYNONYM_GROUPS.flatMap(group=>group.map(word=>[word,group[0]] as [string,string]))
+);
+// Longest-first so a longer term is canonicalized before a shorter one that is its prefix
+// (e.g. "정답지" must not be partially rewritten by the "정답" rule first).
+const SYNONYM_RE=new RegExp([...SYNONYM_CANONICAL.keys()].sort((a,b)=>b.length-a.length).join("|"),"g");
 
 // Korean compound names are often written with a middle dot for readability (e.g. "사회·문화")
 // while an instruction referring to the same thing usually omits it (e.g. "사회문화") - strip
 // it before comparing so that single character doesn't silently break an otherwise-exact match.
-function stripMiddleDot(s:string):string{
- return s.replace(/·/g,"");
+// Synonym folding runs here too so both sides of every comparison share one vocabulary.
+function normalizeForMatch(s:string):string{
+ return s.replace(/·/g,"").replace(SYNONYM_RE,m=>SYNONYM_CANONICAL.get(m)??m);
 }
 
 // Character-bigram overlap (Dice coefficient) - a general, language-agnostic way to score how
@@ -187,7 +214,7 @@ export function computeTokenWeights(tokens:string[],candidateTexts:string[]):Map
  const weights=new Map<string,number>();
  const n=candidateTexts.length;
  if(!n){for(const tok of tokens)weights.set(tok,1);return weights;}
- const normalized=candidateTexts.map(t=>stripMiddleDot(t.toLowerCase()));
+ const normalized=candidateTexts.map(t=>normalizeForMatch(t.toLowerCase()));
  for(const tok of tokens){
   // Deliberately exact-substring only here, not fuzzy - computing document frequency with
   // the same bigram fuzzy matching used for actual scoring would mean re-running that
@@ -207,7 +234,7 @@ export function computeTokenWeights(tokens:string[],candidateTexts:string[]):Map
 
 export function relevanceRatioTokens(text:string,tokens:string[],weights?:Map<string,number>):number{
  if(!tokens.length)return 1;
- const normalizedText=stripMiddleDot(text.toLowerCase());
+ const normalizedText=normalizeForMatch(text.toLowerCase());
  const textTokens=tokenize(normalizedText);
  let scoreSum=0,weightSum=0;
  for(const tok of tokens){

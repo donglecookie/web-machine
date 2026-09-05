@@ -3,6 +3,7 @@ import {KEYWORD_RE,SUBMIT_INTENT_RE,RESET_INTENT_RE,DESTRUCTIVE_INTENT_RE,sameHo
 import type {Stagehand,Page,Locator,StagehandClientObserveOptions} from "@browserbasehq/stagehand";
 import {readdir} from "node:fs/promises";
 import {logger} from "../runtime/logger.js";
+import {RunState} from "./runState.js";
 
 // A single recorded step: what was clicked, on which page. Typed rather than `any` so that
 // e.g. reading `.action.kind` or `.url` is checked - these fields are read in several places
@@ -199,21 +200,12 @@ async function syncActivePage(stagehand:Stagehand,current:Page):Promise<Page>{
 
 export async function resolve(stagehand:Stagehand,page:Page,instruction:string,maxSteps=8,budget:Budget=newBudget()){
  const history:HistoryEntry[]=[];
- let budgetWarned=false;
  const fileType:FileType=detectFileType(instruction);
  const instructionTokens=tokenize(instruction); // instruction never changes across this run - tokenize once, not per loop iteration
- // observe() picks that get rejected (link/non-interactive/reset/destructive) don't go into
- // history, since they weren't real actions - but without SOME record, the next LLM call has
- // no idea a suggestion was already rejected and can re-propose the identical one. Tracked
- // separately (not in history) so it doesn't look like something we actually clicked.
- const rejectedPicks:string[]=[];
- // Mutable, adaptive-to-this-run candidate caps (see the "request too large" catch below) -
- // start at the normal defaults and only shrink if this specific provider/run turns out to
- // have a small enough per-minute token ceiling that the normal size doesn't fit.
- let candidateCap={button:TOP_N_BUTTON,link:TOP_N_LINK};
- // How many times locator:"main" has failed to narrow anything on THIS run - once it hits
- // MAIN_SCOPE_MISS_LIMIT, stop attempting it for the rest of this run (see the loop below).
- let mainScopeMisses=0;
+ // All per-run mutable bookkeeping (candidate caps, main-scope misses, rejected picks,
+ // one-shot notices) lives in one object with its update rules, instead of several loose
+ // `let`s whose rules were inlined at each use site across this function. See runState.ts.
+ const state=new RunState({buttonCap:TOP_N_BUTTON,linkCap:TOP_N_LINK,mainScopeMissLimit:MAIN_SCOPE_MISS_LIMIT});
  // observe() already grounds a concrete selector, so execute it directly via the
  // Playwright-style Locator API (no LLM call) instead of re-asking the model what to do.
  // Only fall back to the LLM-driven act() (which re-reasons and self-heals) if the direct
@@ -316,7 +308,7 @@ export async function resolve(stagehand:Stagehand,page:Page,instruction:string,m
     const buildPrompt=(cap:{button:number;link:number})=>`Goal: find "${instruction}".
 
 Prior actions (excluded from candidates below; use to judge if a filter flow is still in progress):
-${recap(history)}${rejectedPicks.length?`\nAlready rejected, don't re-suggest: ${rejectedPicks.slice(-5).join("; ")}`:""}
+${recap(history)}${state.recentRejects().length?`\nAlready rejected, don't re-suggest: ${state.recentRejects().join("; ")}`:""}
 
 Page candidates:
 ${summarize(freshCandidates,scoreCandidate,cap)}
@@ -333,7 +325,7 @@ Never log out, delete, purchase, subscribe, or make other irreversible changes.`
     // of only reacting to a rejection after the fact - a rejected call costs a full round-trip
     // and yields nothing. Uses the same shrink step as the post-rejection path so both
     // converge on the same floor, and stops as soon as it fits or can't shrink further.
-    let effectiveCap=candidateCap;
+    let effectiveCap=state.candidateCap;
     let promptText=buildPrompt(effectiveCap);
     while(estimateTokens(promptText)>PROMPT_TOKEN_SOFT_LIMIT){
      const next=shrinkCandidateCap(effectiveCap);
@@ -393,7 +385,7 @@ Never log out, delete, purchase, subscribe, or make other irreversible changes.`
     // for this particular query"), which is unambiguous enough evidence on its own that a
     // second, deliberately-more-lenient chance wasn't actually buying any real safety margin,
     // just an extra guaranteed-repeat error.
-    const tryMainScope=mainScopeMisses<MAIN_SCOPE_MISS_LIMIT;
+    const tryMainScope=state.shouldTryMainScope;
     // The scoped attempt swallows its error so an unusable locator can fall through to the
     // unscoped retry - but NOT every error deserves that retry. A provider-level failure
     // (exhausted credits, prompt already over the token ceiling) will fail identically on the
@@ -408,7 +400,7 @@ Never log out, delete, purchase, subscribe, or make other irreversible changes.`
       if(kind!=="other")throw scopedErr;
       obs=null;
      }
-     if(!obs?.data?.length)mainScopeMisses++;
+     if(!obs?.data?.length)state.recordMainScopeMiss();
     }
     if(!obs?.data?.length){
      budget.llmCalls++;
@@ -437,7 +429,7 @@ Never log out, delete, purchase, subscribe, or make other irreversible changes.`
      }
      acted=true;
     }else if(evaluation.reject){
-     rejectedPicks.push(nextText);
+     state.recordRejectedPick(nextText);
      logger.warn("resolve.pick_rejected",{pick:next.description,reason:evaluation.reason,fallback:"mechanical"});
     }
    }catch(e){
@@ -449,20 +441,19 @@ Never log out, delete, purchase, subscribe, or make other irreversible changes.`
     // are certain to fail. Treat it like budget exhaustion: stop attempting the LLM path for
     // the remainder of this run and rely on the free mechanical fallback instead.
     if(errorKind==="credits-exhausted"){
-     budget.llmCalls=budget.maxLlmCalls;
-     if(!budgetWarned){logger.warn("resolve.credits_exhausted",{action:"continuing with free heuristic clicks only"});budgetWarned=true;}
+     state.exhaustBudget(budget);
+     if(state.claimDegradedNotice())logger.warn("resolve.credits_exhausted",{action:"continuing with free heuristic clicks only"});
     }else if(errorKind==="request-too-large"){
      // Unlike the credits case above, waiting would NOT help here either - retrying sends the
      // identical oversized prompt and fails identically again. The candidate list is what's
      // driving prompt size on a page with many similarly-shaped buttons (seen in practice), so
      // shrink it for the rest of this run instead.
-     candidateCap=shrinkCandidateCap(candidateCap);
-     logger.warn("resolve.request_too_large",{buttons:candidateCap.button,links:candidateCap.link,scope:"rest of this run"});
+     state.shrinkCandidateCap();
+     logger.warn("resolve.request_too_large",{buttons:state.candidateCap.button,links:state.candidateCap.link,scope:"rest of this run"});
     }
    }
-  }else if(!budgetWarned){
+  }else if(state.claimDegradedNotice()){
    logger.warn("resolve.budget_exhausted",{maxLlmCalls:budget.maxLlmCalls,action:"continuing with free heuristic clicks only"});
-   budgetWarned=true;
   }
 
   if(!acted){
@@ -473,8 +464,12 @@ Never log out, delete, purchase, subscribe, or make other irreversible changes.`
    selector=action.selector;
    actionText=action.text||"";
    history.push({url,action});
+   // Try the stable data-wm-id selector first, then the structural path: if the page replaced
+   // the node between scraping and clicking, our injected attribute went with it, and the
+   // structural path is the only remaining handle.
+   const fallbackSelector=("fallbackSelector" in action?action.fallbackSelector:undefined);
    const ok=action.selector
-    ?await clickFast(action.selector)
+    ?await clickFast(action.selector)||(fallbackSelector?await clickFast(fallbackSelector):false)
     :action.url
     ?await page.goto(action.url,{waitUntil:"domcontentloaded",timeout:CALL_TIMEOUT}).then(()=>true,()=>false)
     :false;

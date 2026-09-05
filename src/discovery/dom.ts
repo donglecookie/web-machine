@@ -1,5 +1,5 @@
 import {KEYWORD_RE,FileType,ANY_FILE_TYPE,relevanceRatioTokens} from "./patterns.js";
-export type Candidate={kind:string;text:string;url?:string;selector?:string;score:number;nav:boolean};
+export type Candidate={kind:string;text:string;url?:string;selector?:string;fallbackSelector?:string;score:number;nav:boolean};
 const EVAL_SOURCE=`(() => {
   const a = [];
   function cssPath(el) {
@@ -25,13 +25,30 @@ const EVAL_SOURCE=`(() => {
     }
     return "";
   }
+  function stableId(el) {
+    // Tag each candidate with our own attribute and select by it. Structural paths (CSS
+    // nth-of-type chains, XPath) describe a position that silently stops matching the moment
+    // the page re-renders, and mixing the two formats made "is this the element I already
+    // tried?" a string comparison that could never succeed across formats. An injected id is
+    // one format, survives re-render as long as the node does, and stays comparable.
+    let id = el.getAttribute("data-wm-id");
+    if (!id) { id = "wm" + (window.__wmSeq = (window.__wmSeq || 0) + 1); el.setAttribute("data-wm-id", id); }
+    return id;
+  }
   function add(kind, e, url) {
     let text = (e.innerText || e.textContent || e.getAttribute("aria-label") || e.title || "").trim().replace(/\\s+/g, " ").slice(0, 300);
     if (text.length > 0 && text.length <= 6) {
       const ctx = nearbyLabel(e);
       if (ctx && !text.includes(ctx)) text = ctx + " " + text;
     }
-    if (text || url) a.push({ kind, text, url: url || undefined, selector: cssPath(e) || undefined, nav: Boolean(e.closest("nav,header")) });
+    if (text || url) a.push({
+      kind, text, url: url || undefined,
+      selector: '[data-wm-id="' + stableId(e) + '"]',
+      // Keep the structural path too: it's the only usable handle if the page replaces the
+      // node (dropping our attribute with it) between scraping and clicking.
+      fallbackSelector: cssPath(e) || undefined,
+      nav: Boolean(e.closest("nav,header")),
+    });
   }
   document.querySelectorAll('a[href],[download],button,[role=button],[role=tab],[tabindex="0"],iframe[src],embed[src],object[data]').forEach((e) => {
     if (e.hasAttribute("download")) add("download", e, e.href || e.getAttribute("href"));

@@ -169,3 +169,21 @@ test("relevanceRatio: an entirely unrelated domain (Spain map) scores near zero 
  assert.equal(relevanceRatio("2025년 고3 9월 모평(평가원) 사회문화_문제지.pdf","스페인 지도"),0);
  assert.ok(relevanceRatio("스페인 지도 고화질.jpg","스페인 지도")>=0.5);
 });
+
+test("relevanceRatio folds common synonyms so a wording variant scores as a full match (offline substitute for embedding-based synonymy, without an API call per candidate)", () => {
+ assert.equal(relevanceRatio("앵무새 이미지.jpg","앵무새 사진"),1);
+ assert.equal(relevanceRatio("앵무새 그림.png","앵무새 사진"),1);
+ assert.equal(relevanceRatio("parrot picture.jpg","parrot photo"),1);
+});
+
+test("synonym folding does not collapse genuinely different documents of the same exam (문제지 vs 정답지 must stay distinguishable)", () => {
+ const tokens=tokenize("사회문화 문제지");
+ const problem=relevanceRatioTokens("2025년 고3 9월 사회·문화 문제",tokens);
+ const answers=relevanceRatioTokens("2025년 고3 9월 사회·문화 정답",tokens);
+ assert.ok(problem>answers,"the requested document type must still outrank a different one");
+});
+
+test("synonym folding handles a longer term before its shorter prefix (정답지 must not be mangled by the 정답 rule)", () => {
+ assert.equal(relevanceRatio("정답지","정답"),1);
+ assert.equal(relevanceRatio("정답","정답지"),1);
+});
