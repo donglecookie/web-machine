@@ -68,7 +68,7 @@ test("relevanceRatioTokens matches a 4-digit year regardless of Korean suffix (r
  const tokens=tokenize("2025학년도 9월 모의평가 사회문화");
  assert.ok(relevanceRatioTokens("2025년",tokens)>0);
  assert.equal(relevanceRatioTokens("2025년",tokens),relevanceRatioTokens("2025학년도",tokens));
- assert.equal(relevanceRatioTokens("2024년",tokens),0); // a different year must not accidentally match
+ assert.ok(relevanceRatioTokens("2024년",tokens)<0,"a different, conflicting year must score below zero, not just fail to match"); // see YEAR_CONFLICT_PENALTY
 });
 
 test("relevanceRatioTokens matches through a middle dot in the candidate text (regression: '사회문화' in the instruction failed to match '사회·문화' as actually written on real sites, silently under-scoring relevance all session)", () => {
@@ -193,4 +193,20 @@ test("synonym folding does not collapse genuinely different documents of the sam
 test("synonym folding handles a longer term before its shorter prefix (정답지 must not be mangled by the 정답 rule)", () => {
  assert.equal(relevanceRatio("정답지","정답"),1);
  assert.equal(relevanceRatio("정답","정답지"),1);
+});
+
+test("relevanceRatioTokens: an explicit year conflict outweighs matching several other tokens (regression: '2027학년도 9월 모의평가' - wrong year, but matching month+type - outscored '2025년' - the correct year alone - under plain zero-credit-for-a-miss scoring, causing the wrong document to be picked)", () => {
+ const instruction="2025학년도 9월 모의평가 사회문화";
+ const tokens=tokenize(instruction);
+ const wrongYearText="2027학년도 9월 모의평가 문제";
+ const correctYearText="2025년";
+ // Weighted, the way the real system always scores candidates (via computeTokenWeights over
+ // the actual candidate pool) - under plain uniform weighting the -2 penalty and the two +1
+ // matches happen to cancel to exactly 0 for this specific token count, which is a coincidence
+ // of unweighted math, not the real behavior this regression is about.
+ const weights=computeTokenWeights(tokens,[wrongYearText,correctYearText]);
+ const wrongYearButOtherwiseMatching=relevanceRatioTokens(wrongYearText,tokens,weights);
+ const correctYearAlone=relevanceRatioTokens(correctYearText,tokens,weights);
+ assert.ok(correctYearAlone>wrongYearButOtherwiseMatching,"getting the year right (alone) must outrank getting the year wrong (even with other matches)");
+ assert.ok(wrongYearButOtherwiseMatching<0,"an explicit year conflict should pull the score negative, not just fail to add points");
 });

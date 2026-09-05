@@ -204,10 +204,26 @@ const FUZZY_MATCH_THRESHOLD=0.6;
 //    everything else (morphological/spelling variation), at partial credit proportional to
 //    how close the match is, so a near-match still outranks a candidate with no relation at
 //    all instead of scoring identically to it.
+// A YEAR conflict penalty distinct from the FUZZY_MATCH_THRESHOLD tier below: getting the
+// year explicitly wrong is not just "one less token matched" the way an unrelated word would
+// be - it usually means the candidate identifies a different instance of the same recurring
+// thing entirely (a different year's exam), which no number of matching secondary tokens
+// (month, document type) should be able to outweigh. Seen in practice: a candidate literally
+// titled "2027학년도 9월 모의평가" (wrong year, but correct month+"모의평가") outscored one
+// titled "2025년" (the correct year, nothing else) under plain 0-credit-for-a-miss scoring,
+// because two ordinary token matches beat one - even though the first candidate is
+// unambiguously the wrong document. A negative score (not just 0) is what lets this actually
+// flip the comparison rather than just narrow the gap.
+const YEAR_CONFLICT_PENALTY=-2;
+
 function tokenMatchScore(normalizedText:string,textTokens:string[],tok:string):number{
  if(normalizedText.includes(tok))return 1;
  const year=tok.match(/(19|20)\d{2}/)?.[0];
- if(year)return normalizedText.includes(year)?1:0;
+ if(year){
+  if(normalizedText.includes(year))return 1;
+  const otherYear=normalizedText.match(/(19|20)\d{2}/)?.[0];
+  return otherYear&&otherYear!==year?YEAR_CONFLICT_PENALTY:0;
+ }
  if(!textTokens.length)return 0;
  let best=0;
  for(const tt of textTokens){const d=diceCoefficient(tok,tt);if(d>best)best=d;}
