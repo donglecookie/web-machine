@@ -142,3 +142,14 @@ test("resolve records history entries carrying both the url and the action, so l
   assert.ok(h.action);
  }
 });
+
+test("resolve tells act() to clear the search field before typing, not just type (regression: 'type X' alone was sometimes interpreted as appending to whatever the field already held, producing a self-concatenated, unmatchable query and stalling the run on a search-button click loop)", async () => {
+ const {page,stagehand,actCalls}=makeFakes({
+  candidates:[{kind:"button",text:"사회문화",selector:"b1",nav:false}],
+  observeResults:[{data:[{description:"Search input box",selector:"xpath=/html/body/input[1]"}]}],
+ });
+ await resolve(stagehand,page,"사회문화",2,newBudget(5));
+ const searchAct=actCalls.find(a=>a.toLowerCase().includes("search"));
+ assert.ok(searchAct,"expected a search-typing act() call");
+ assert.match(searchAct!,/clear/i);
+});

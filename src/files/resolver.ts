@@ -409,7 +409,13 @@ Never log out, delete, purchase, subscribe, or make other irreversible changes.`
      history.push({url,action:{kind:evaluation.isLink?"link":"button",text:next.description,selector:next.selector}});
      if(/search|검색/i.test(next.description)){
       await page.waitForTimeout(300);
-      await act(`Type "${instruction}" into the search input field and press Enter to submit the search.`);
+      // Explicitly told to clear first: without this, "type X" was sometimes interpreted as
+      // appending to whatever the field already held (leftover text from an earlier partial
+      // interaction, or this same branch firing again on a later step) rather than replacing
+      // it - observed in practice as a garbled, self-concatenated query
+      // ("...사회문화2025학년도...사회문화") that could never match anything, eventually
+      // stalling the run on a search button click loop.
+      await act(`Clear any existing text in the search input field, then type "${instruction}" into it and press Enter to submit the search.`);
       await page.waitForTimeout(1000);
      }
      acted=true;
