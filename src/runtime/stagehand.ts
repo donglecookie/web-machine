@@ -1,4 +1,5 @@
 import {Stagehand, localBrowser} from "@browserbasehq/stagehand";
+import type {LocalBrowserLaunchOptions,ModelConfig} from "@browserbasehq/stagehand";
 import {chromium} from "playwright";
 import path from "node:path";
 import {createOpenAICompatibleClient} from "./openaiCompatibleClient.js";
@@ -17,7 +18,7 @@ export async function createStagehand(){
  if(compatApiKey&&(!compatBaseURL||!compatModel))throw new Error("OPENAI_COMPATIBLE_API_KEY is set but OPENAI_COMPATIBLE_BASE_URL and/or OPENAI_COMPATIBLE_MODEL is missing - both are required since there's no default provider to assume for an arbitrary OpenAI-compatible endpoint.");
 
  const executablePath=process.env.CHROME_PATH||chromium.executablePath();
- const launch:any={headless:true,acceptDownloads:true,downloadsPath:path.resolve("downloads"),args:["--no-sandbox","--disable-setuid-sandbox","--disable-dev-shm-usage","--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"],executablePath};
+ const launch:LocalBrowserLaunchOptions={headless:true,acceptDownloads:true,downloadsPath:path.resolve("downloads"),args:["--no-sandbox","--disable-setuid-sandbox","--disable-dev-shm-usage","--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"],executablePath};
  const browser=await localBrowser.launch(launch);
 
  // Stagehand.create() itself can still fail after the browser above is already running (e.g.
@@ -36,8 +37,11 @@ export async function createStagehand(){
   // provider is still sitting in .env silently sends the WRONG key to the new provider.
   const provider=model.split("/")[0];
   const apiKey=process.env[PROVIDER_API_KEY_ENV_VAR[provider]||""];
-  const modelConfig:any={modelName:model};
-  if(apiKey)modelConfig.apiKey=apiKey;
+  // ModelConfig requires modelName to be one of Stagehand's whitelisted provider/model
+  // strings - a bad or decommissioned model name (hit twice in practice this session) is now
+  // still only caught at Stagehand's own runtime schema check, since STAGEHAND_MODEL is a
+  // free-form env var, but at least everything else about this shape is now checked.
+  const modelConfig={modelName:model as ModelConfig["modelName"],...(apiKey?{apiKey}:{})} as ModelConfig;
   return await Stagehand.create({browser,model:modelConfig,logging:{level:"info"}});
  }catch(e){
   await browser.close().catch(()=>{});

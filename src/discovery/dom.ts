@@ -1,4 +1,5 @@
 import {KEYWORD_RE,FileType,ANY_FILE_TYPE,relevanceRatioTokens} from "./patterns.js";
+import type {Page} from "@browserbasehq/stagehand";
 export type Candidate={kind:string;text:string;url?:string;selector?:string;fallbackSelector?:string;score:number;nav:boolean};
 const EVAL_SOURCE=`(() => {
   const a = [];
@@ -60,8 +61,9 @@ const EVAL_SOURCE=`(() => {
   return a;
 })()`;
 const MAX_CANDIDATES=60;
-export async function inspect(page:any,fileType:FileType=ANY_FILE_TYPE,instructionTokens:string[]=[]):Promise<Candidate[]>{
- const xs=await page.evaluate(EVAL_SOURCE);
+type RawCandidate={kind:string;text:string;url?:string;selector:string;fallbackSelector?:string;nav:boolean};
+export async function inspect(page:Page,fileType:FileType=ANY_FILE_TYPE,instructionTokens:string[]=[]):Promise<Candidate[]>{
+ const xs=await page.evaluate<RawCandidate[]>(EVAL_SOURCE);
  // Hoisted out of the per-candidate loop below: aliases are a small, fixed list (and already
  // lowercase in every FILE_TYPES entry) - no reason to re-lowercase them for every candidate.
  const lowerAliases=fileType.aliases.map(a=>a.toLowerCase());
@@ -76,7 +78,7 @@ export async function inspect(page:any,fileType:FileType=ANY_FILE_TYPE,instructi
  // downstream gets a chance to save it. A modest instruction-relevance boost here (unweighted
  // - there's no full candidate pool yet to compute token weights from) is enough to keep a
  // genuinely matching candidate alive into the pool that resolver.ts actually sees.
- const scored=xs.map((x:any)=>{
+ const scored=xs.map((x:RawCandidate):Candidate=>{
   const s=x.text.toLowerCase();
   let score=0;
   if(KEYWORD_RE.test(s)||lowerAliases.some(a=>s.includes(a)))score+=60;
@@ -89,6 +91,6 @@ export async function inspect(page:any,fileType:FileType=ANY_FILE_TYPE,instructi
  // Include the selector in the de-dup key: several genuinely distinct elements (e.g. three
  // separate "다운로드" buttons under different tabs) can share identical text/kind/url, and
  // collapsing them by text alone would silently discard all but one option.
- const deduped=scored.filter((c:any)=>{const key=`${c.kind}|${c.text}|${c.url||""}|${c.selector||""}`;if(seen.has(key))return false;seen.add(key);return true;});
- return deduped.sort((a:any,b:any)=>b.score-a.score).slice(0,MAX_CANDIDATES);
+ const deduped=scored.filter((c:Candidate)=>{const key=`${c.kind}|${c.text}|${c.url||""}|${c.selector||""}`;if(seen.has(key))return false;seen.add(key);return true;});
+ return deduped.sort((a:Candidate,b:Candidate)=>b.score-a.score).slice(0,MAX_CANDIDATES);
 }

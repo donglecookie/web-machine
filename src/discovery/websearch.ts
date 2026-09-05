@@ -1,6 +1,7 @@
 import {z} from "zod";
 import {HtmlMachine} from "../machine/HtmlMachine.js";
 import {logger} from "../runtime/logger.js";
+import type {Stagehand,Page} from "@browserbasehq/stagehand";
 export type SearchResult={title:string;url:string};
 
 const RESULTS_SCHEMA=z.object({
@@ -63,10 +64,10 @@ async function htmlSearch(engine:string,url:string,unwrap:(u:string)=>string,noi
 
 // Fallback strategy: if the plain HTML fetch is blocked/changed, use the browser + LLM to
 // read the results page semantically instead of relying on brittle regex/selectors.
-async function browserSearch(page:any,stagehand:any,query:string):Promise<SearchResult[]>{
+async function browserSearch(page:Page,stagehand:Stagehand,query:string):Promise<SearchResult[]>{
  await page.goto(`https://www.bing.com/search?q=${encodeURIComponent(query)}`,{waitUntil:"domcontentloaded",timeout:30000});
  await page.waitForSelector("#b_results",{timeout:10000}).catch(()=>{});
- let extracted:any=null;
+ let extracted:{data?:z.infer<typeof RESULTS_SCHEMA>}|null=null;
  try{
   extracted=await stagehand.extract(
    "List the organic web search result titles and their destination URLs on this search results page. Ignore ads, the search engine's own navigation/help pages, and 'People also ask' boxes.",
@@ -76,14 +77,14 @@ async function browserSearch(page:any,stagehand:any,query:string):Promise<Search
  }catch(e){logger.error("search.extract_failed",{message:e instanceof Error?e.message:String(e)});}
 
  const seen=new Set<string>();
- return((extracted?.data?.results)||[])
-  .map((r:any)=>({title:r.title||"",url:r.url?unwrapBingRedirect(r.url):""}))
+ return(((extracted?.data?.results)||[])
+  .map(r=>({title:r.title||"",url:r.url?unwrapBingRedirect(r.url):""}))
   .filter((r:SearchResult)=>r.url&&/^https?:\/\//.test(r.url)&&!isNoise(r.url))
   .filter((r:SearchResult)=>{if(seen.has(r.url))return false;seen.add(r.url);return true;})
-  .slice(0,8);
+  .slice(0,8));
 }
 
-export async function searchWeb(page:any,stagehand:any,query:string):Promise<SearchResult[]>{
+export async function searchWeb(page:Page,stagehand:Stagehand,query:string):Promise<SearchResult[]>{
  const bing=await htmlSearch("Bing",`https://www.bing.com/search?q=${encodeURIComponent(query)}`,unwrapBingRedirect,isNoise);
  if(bing.length)return bing;
 

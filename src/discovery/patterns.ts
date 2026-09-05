@@ -119,10 +119,14 @@ export function resolveFileUrl(url:string,fileType:FileType=ANY_FILE_TYPE):strin
 // asked for, based on how many distinctive words from the instruction appear in the resulting
 // filename/URL. Also used (via relevanceRatioTokens) to rank page candidates by relevance to
 // the instruction instead of relying on a fixed, site-tuned candidate count.
+const SPLIT_RE=/[\s,·\-–—/|_()]+/;
 export function tokenize(s:string):string[]{
  // Normalized here too, not just on the candidate side: folding synonyms on only one side
  // would leave the two vocabularies mismatched and the mapping would never actually fire.
- return normalizeForMatch(s.toLowerCase()).split(/[\s,·\-–—/|_()]+/).map(t=>t.trim()).filter(t=>t.length>=2);
+ return splitNormalized(normalizeForMatch(s.toLowerCase()));
+}
+function splitNormalized(normalized:string):string[]{
+ return normalized.split(SPLIT_RE).map(t=>t.trim()).filter(t=>t.length>=2);
 }
 
 // Interchangeable words that name the same thing, mapped to one canonical form before
@@ -264,7 +268,7 @@ export function computeTokenWeights(tokens:string[],candidateTexts:string[]):Map
 export function relevanceRatioTokens(text:string,tokens:string[],weights?:Map<string,number>):number{
  if(!tokens.length)return 1;
  const normalizedText=normalizeForMatch(text.toLowerCase());
- const textTokens=tokenize(normalizedText);
+ const textTokens=splitNormalized(normalizedText);
  let scoreSum=0,weightSum=0;
  for(const tok of tokens){
   const w=weights?.get(tok)??1;

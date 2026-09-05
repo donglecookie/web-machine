@@ -23,9 +23,9 @@ test("toOpenAIMessages normalizes a single content block (not an array) the same
 test("toOpenAIMessages converts a tool_use block into OpenAI's tool_calls array", () => {
  const out=toOpenAIMessages([{role:"assistant",content:[{type:"tool_use",id:"call_1",name:"click",input:{selector:"#btn"}}]}]);
  assert.equal(out[0].role,"assistant");
- assert.equal(out[0].tool_calls[0].id,"call_1");
- assert.equal(out[0].tool_calls[0].function.name,"click");
- assert.deepEqual(JSON.parse(out[0].tool_calls[0].function.arguments),{selector:"#btn"});
+ assert.equal(out[0].tool_calls![0].id,"call_1");
+ assert.equal(out[0].tool_calls![0].function.name,"click");
+ assert.deepEqual(JSON.parse(out[0].tool_calls![0].function.arguments),{selector:"#btn"});
 });
 
 test("toOpenAIMessages splits a tool_result block into its own separate role:tool message", () => {
@@ -40,7 +40,7 @@ test("toOpenAIMessages combines text and tool_use blocks from the same message c
  const out=toOpenAIMessages([{role:"assistant",content:[{type:"text",text:"thinking..."},{type:"tool_use",id:"c1",name:"search",input:{}}]}]);
  assert.equal(out.length,1);
  assert.equal(out[0].content,"thinking...");
- assert.equal(out[0].tool_calls[0].function.name,"search");
+ assert.equal(out[0].tool_calls![0].function.name,"search");
 });
 
 test("toOpenAITools maps Stagehand tool definitions to OpenAI function-calling format", () => {

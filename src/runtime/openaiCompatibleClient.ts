@@ -10,10 +10,14 @@
 // This file translates in both directions so any OpenAI-compatible endpoint can act as a
 // Stagehand model - it doesn't assume or default to any one provider.
 
+// Not exported by Stagehand (only visible as an inferred zod type in error messages), so
+// defined locally to match: any JSON.parse() result recursively has exactly this shape.
+type JSONValue=string|number|boolean|null|JSONValue[]|{[key:string]:JSONValue};
+
 type Block=
  |{type:"text";text:string}
  |{type:"image";data:string;mimeType:string}
- |{type:"tool_use";id:string;name:string;input:any}
+ |{type:"tool_use";id:string;name:string;input:Record<string,JSONValue>}
  |{type:"tool_result";toolUseId:string;content:Array<{type:"text";text:string}|{type:"image";data:string;mimeType:string}>;isError?:boolean};
 
 type StagehandMessage={role:"user"|"assistant";content:string|Block|Block[]};
@@ -32,18 +36,37 @@ type StagehandRequest={
 };
 type StagehandResponse=
  |{role:"assistant";content:Block[];stopReason?:string;usage?:{inputTokens:number;outputTokens:number;totalTokens:number};outputFormat:"text"}
- |{role:"assistant";content:Block[];stopReason?:string;usage?:{inputTokens:number;outputTokens:number;totalTokens:number};outputFormat:"json_schema";structuredContent:any};
+ |{role:"assistant";content:Block[];stopReason?:string;usage?:{inputTokens:number;outputTokens:number;totalTokens:number};outputFormat:"json_schema";structuredContent:JSONValue};
+
+// The OpenAI Chat Completions wire format this file constructs and parses - defined here
+// (rather than depending on an official SDK, since this needs to work against ANY compatible
+// endpoint, not just OpenAI's own) so a typo in a field name is a compile error instead of a
+// silently-undefined value.
+type OpenAIMessage={role:string;content:string|null;tool_calls?:OpenAIToolCall[];tool_call_id?:string};
+type OpenAIToolCall={id:string;type:"function";function:{name:string;arguments:string}};
+type OpenAITool={type:"function";function:{name:string;description:string;parameters:Record<string,unknown>}};
+type OpenAIRequestBody={
+ model:string;
+ messages:OpenAIMessage[];
+ temperature?:number;
+ response_format?:{type:"json_schema";json_schema:{name:string;description?:string;schema:unknown;strict:boolean}};
+ tools?:OpenAITool[];
+ tool_choice?:string;
+};
+type OpenAIUsage={prompt_tokens?:number;completion_tokens?:number;total_tokens?:number};
+type OpenAIChoice={message?:{content?:string|null;tool_calls?:{id?:string;function?:{name?:string;arguments?:string}}[]};finish_reason?:string};
+type OpenAIResponseBody={choices?:OpenAIChoice[];usage?:OpenAIUsage};
 
 // Stagehand's content is a string, a single block, or an array of blocks; a tool_result block
 // becomes its own separate OpenAI `role:"tool"` message, since OpenAI has no equivalent of an
 // inline tool-result block within a user/assistant message.
-export function toOpenAIMessages(messages:StagehandMessage[],systemPrompt?:string):any[]{
- const out:any[]=systemPrompt?[{role:"system",content:systemPrompt}]:[];
+export function toOpenAIMessages(messages:StagehandMessage[],systemPrompt?:string):OpenAIMessage[]{
+ const out:OpenAIMessage[]=systemPrompt?[{role:"system",content:systemPrompt}]:[];
  for(const m of messages){
   if(typeof m.content==="string"){out.push({role:m.role,content:m.content});continue;}
   const blocks:Block[]=Array.isArray(m.content)?m.content:[m.content];
   const textParts:string[]=[];
-  const toolCalls:any[]=[];
+  const toolCalls:OpenAIToolCall[]=[];
   for(const block of blocks){
    if(block.type==="text")textParts.push(block.text);
    else if(block.type==="tool_use")toolCalls.push({id:block.id,type:"function",function:{name:block.name,arguments:JSON.stringify(block.input)}});
@@ -55,7 +78,7 @@ export function toOpenAIMessages(messages:StagehandMessage[],systemPrompt?:strin
    // silently mis-encoded, since a wrong image encoding is worse than a missing one here.
   }
   if(textParts.length||toolCalls.length){
-   const msg:any={role:m.role,content:textParts.join("\n")||null};
+   const msg:OpenAIMessage={role:m.role,content:textParts.join("\n")||null};
    if(toolCalls.length)msg.tool_calls=toolCalls;
    out.push(msg);
   }
@@ -63,18 +86,18 @@ export function toOpenAIMessages(messages:StagehandMessage[],systemPrompt?:strin
  return out;
 }
 
-export function toOpenAITools(tools?:StagehandTool[]):any[]|undefined{
+export function toOpenAITools(tools?:StagehandTool[]):OpenAITool[]|undefined{
  if(!tools?.length)return undefined;
  return tools.map(t=>({type:"function",function:{name:t.name,description:t.description||"",parameters:t.inputSchema||{type:"object",properties:{}}}}));
 }
 
 // The reverse direction: an OpenAI-shaped choice becomes Stagehand's block-array response.
-export function fromOpenAIChoiceText(choice:any,usage:any):StagehandResponse{
+export function fromOpenAIChoiceText(choice:OpenAIChoice|undefined,usage:OpenAIUsage|undefined):StagehandResponse{
  const content:Block[]=[];
  const msg=choice?.message||{};
  if(msg.content)content.push({type:"text",text:String(msg.content)});
  for(const tc of msg.tool_calls||[]){
-  let input:Record<string,unknown>={};
+  let input:Record<string,JSONValue>={};
   try{input=JSON.parse(tc.function?.arguments||"{}");}catch{}
   content.push({type:"tool_use",id:tc.id||`call_${Math.random().toString(36).slice(2)}`,name:tc.function?.name||"",input});
  }
@@ -87,9 +110,9 @@ export function fromOpenAIChoiceText(choice:any,usage:any):StagehandResponse{
  };
 }
 
-export function fromOpenAIChoiceJsonSchema(choice:any,usage:any):StagehandResponse{
+export function fromOpenAIChoiceJsonSchema(choice:OpenAIChoice|undefined,usage:OpenAIUsage|undefined):StagehandResponse{
  const raw=String(choice?.message?.content||"{}");
- let structuredContent:any={};
+ let structuredContent:JSONValue={};
  try{structuredContent=JSON.parse(raw);}catch{/* leave as {} if the model didn't return valid JSON */}
  return{
   role:"assistant",
@@ -101,16 +124,18 @@ export function fromOpenAIChoiceJsonSchema(choice:any,usage:any):StagehandRespon
  };
 }
 
+import type {ClientLLM} from "@browserbasehq/stagehand";
+
 export type OpenAICompatibleClientOptions={apiKey:string;model:string;baseURL:string;headers?:Record<string,string>};
 
 // Builds a Stagehand ClientLLM ({generate}) backed by any OpenAI-compatible chat completions
 // endpoint (OpenRouter, a self-hosted server, etc.) - baseURL is required rather than
 // defaulting to any one vendor, so this adapter stays provider-agnostic on its own terms.
-export function createOpenAICompatibleClient(opts:OpenAICompatibleClientOptions){
+export function createOpenAICompatibleClient(opts:OpenAICompatibleClientOptions):ClientLLM{
  return{
   async generate(input:StagehandRequest,signal?:AbortSignal):Promise<StagehandResponse>{
    const wantsJsonSchema=input.responseFormat?.type==="json_schema";
-   const body:any={
+   const body:OpenAIRequestBody={
     model:opts.model,
     messages:toOpenAIMessages(input.messages,input.systemPrompt),
     ...(input.temperature!==undefined?{temperature:input.temperature}:{})
@@ -129,7 +154,7 @@ export function createOpenAICompatibleClient(opts:OpenAICompatibleClientOptions)
     signal
    });
    if(!res.ok)throw new Error(`OpenAI-compatible endpoint error: HTTP ${res.status} ${await res.text().catch(()=>"")}`);
-   const data:any=await res.json();
+   const data=await res.json() as OpenAIResponseBody;
    const choice=data?.choices?.[0];
    if(!choice)throw new Error(`OpenAI-compatible endpoint returned no choices: ${JSON.stringify(data).slice(0,300)}`);
    return wantsJsonSchema?fromOpenAIChoiceJsonSchema(choice,data.usage):fromOpenAIChoiceText(choice,data.usage);

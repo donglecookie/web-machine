@@ -1,11 +1,13 @@
 import {searchWeb} from "./discovery/websearch.js";
 import {newBudget} from "./files/resolver.js";
+import type {WebMachine} from "./machine/WebMachine.js";
+import type {Stagehand} from "@browserbasehq/stagehand";
 
 // Given only a query (no site), find the target file by:
 // 1. Searching the web for candidate sites likely to host it (our own extract()-based search layer).
 // 2. Trying each candidate in turn with the same site-navigation engine (WebMachine.fetch),
 //    since visiting any particular site is just a means to the end of getting the content.
-export async function discoverAndFetch(machine:any,stagehand:any,query:string,maxSites=3,maxStepsPerSite=6){
+export async function discoverAndFetch(machine:WebMachine,stagehand:Stagehand,query:string,maxSites=3,maxStepsPerSite=6){
  if(!machine.page)return{ok:false,message:"machine.open() must be called before discoverAndFetch().",attempts:[]};
  const results=await searchWeb(machine.page,stagehand,query);
  if(!results.length)return{ok:false,message:"Web search returned no candidate sites.",attempts:[]};
@@ -14,7 +16,7 @@ export async function discoverAndFetch(machine:any,stagehand:any,query:string,ma
  // multi-site search job has an overall cost ceiling instead of up to maxSites times the
  // per-site ceiling.
  const budget=newBudget(40);
- const attempts:any[]=[];
+ const attempts:({site:string;title:string;outcome:Awaited<ReturnType<WebMachine["fetch"]>>}|{site:string;title:string;error:string})[]=[];
  for(const r of results.slice(0,maxSites)){
   try{
    await machine.open(r.url);

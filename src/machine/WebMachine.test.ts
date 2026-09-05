@@ -8,7 +8,7 @@ test("withRelevanceCheck passes through a failed result unchanged (no relevance 
 });
 
 test("withRelevanceCheck warns when neither the path nor the history text is relevant", () => {
- const result={ok:true,path:"downloads/random123.pdf",history:[{action:{text:"클릭"}}]};
+ const result={ok:true,path:"downloads/random123.pdf",history:[{url:"https://x.test/",action:{kind:"button",text:"클릭"}}]};
  const out=withRelevanceCheck(result,"2025학년도 9월 모의평가 사회문화");
  assert.ok(out.warning);
 });
@@ -18,8 +18,8 @@ test("withRelevanceCheck: an opaque CDN filename alone would warn, but the descr
   ok:true,
   path:"downloads/s_samun_mun_A1AT6KCF.pdf",
   history:[
-   {action:{text:"보기"}},
-   {action:{text:"2025년 고3 9월 모평(평가원) 사회·문화_문제지.pdf 원본 열기"}},
+   {url:"https://x.test/",action:{kind:"button",text:"보기"}},
+   {url:"https://x.test/",action:{kind:"button",text:"2025년 고3 9월 모평(평가원) 사회·문화_문제지.pdf 원본 열기"}},
   ],
  };
  const out=withRelevanceCheck(result,"2025학년도 9월 모의평가 사회문화");
@@ -31,9 +31,9 @@ test("withRelevanceCheck checks a short window of recent history, not just the v
   ok:true,
   path:"downloads/dl_a1b2c3.pdf", // opaque saved filename, same as a native-download save would produce
   history:[
-   {action:{text:"9월"}},
-   {action:{text:"2025년 고3 9월 모평(평가원) 사회·문화"}}, // the descriptive click - two steps back, not last
-   {action:{text:"받기"}}, // last action: undescriptive on its own
+   {url:"https://x.test/",action:{kind:"button",text:"9월"}},
+   {url:"https://x.test/",action:{kind:"button",text:"2025년 고3 9월 모평(평가원) 사회·문화"}}, // the descriptive click - two steps back, not last
+   {url:"https://x.test/",action:{kind:"button",text:"받기"}}, // last action: undescriptive on its own
   ],
  };
  const out=withRelevanceCheck(result,"2025학년도 9월 모의평가 사회문화");
@@ -44,7 +44,7 @@ test("withRelevanceCheck still warns even with descriptive history text, if that
  const result={
   ok:true,
   path:"downloads/xyz789.pdf",
-  history:[{action:{text:"2024년 고2 6월 학평(부산) 수학 원본 열기"}}],
+  history:[{url:"https://x.test/",action:{kind:"button",text:"2024년 고2 6월 학평(부산) 수학 원본 열기"}}],
  };
  const out=withRelevanceCheck(result,"2025학년도 9월 모의평가 사회문화");
  assert.ok(out.warning);
