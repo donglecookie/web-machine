@@ -1,6 +1,3 @@
-import type {Budget} from "./resolver.js";
-import {shrinkCandidateCap} from "./resolver.js";
-
 // All of the mutable bookkeeping a single resolve() run carries, plus the rules for updating
 // it. Previously these lived as five separate `let`s scattered through a ~450-line function,
 // with each update rule (how far to shrink, warn only once, keep only the last few rejects,
@@ -12,6 +9,35 @@ import {shrinkCandidateCap} from "./resolver.js";
 // stays in resolve(); mixing those back in here would just relocate the god-object problem.
 
 export const RECENT_REJECTS_SHOWN=5;
+const DEFAULT_MAX_LLM_CALLS=20;
+const CAP_FLOOR={button:10,link:5};
+
+// A per-run cap on actual LLM calls (observe + act), independent of maxSteps. maxSteps alone
+// doesn't bound cost: a single "step" can trigger an observe() plus one or two act() calls
+// (self-heal fallback, search-box typing). Passing one Budget across multiple resolve() calls
+// (e.g. across several candidate sites in discoverAndFetch) lets the caller cap total spend
+// for the whole job, not just per site.
+//
+// Lives here rather than in resolver.ts so RunState doesn't have to import back from the
+// module that imports it - the two were mutually dependent before, which works but is a
+// fragile shape to leave in place.
+export type Budget={llmCalls:number;maxLlmCalls:number};
+export function newBudget(maxLlmCalls=DEFAULT_MAX_LLM_CALLS):Budget{return{llmCalls:0,maxLlmCalls};}
+
+/** Marks the LLM path spent for the rest of the run (for errors that would fail identically
+ *  on every retry, e.g. exhausted credits). A free function on Budget rather than a RunState
+ *  method: it only ever touches the budget, never any RunState field. */
+export function exhaustBudget(budget:Budget):void{
+ budget.llmCalls=budget.maxLlmCalls;
+}
+
+// Halves the candidate cap (with a floor so it never shrinks to the point of excluding
+// everything) in response to a request-too-large error - adaptive to this run only, not a
+// global default, since a provider with more headroom shouldn't be penalized by a cap sized
+// for this one's limit.
+export function shrinkCandidateCap(cap:{button:number;link:number}):{button:number;link:number}{
+ return{button:Math.max(CAP_FLOOR.button,Math.floor(cap.button/2)),link:Math.max(CAP_FLOOR.link,Math.floor(cap.link/2))};
+}
 
 export class RunState {
  /** Candidate caps for prompt size, shrunk adaptively if the provider rejects oversized requests. */
@@ -58,11 +84,5 @@ export class RunState {
   if(this.degradedNotice)return false;
   this.degradedNotice=true;
   return true;
- }
-
- /** Marks the LLM path as spent for the rest of the run (used for errors that would fail
-  *  identically on every retry, e.g. exhausted credits). */
- exhaustBudget(budget:Budget):void{
-  budget.llmCalls=budget.maxLlmCalls;
  }
 }

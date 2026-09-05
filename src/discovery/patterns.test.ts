@@ -172,8 +172,15 @@ test("relevanceRatio: an entirely unrelated domain (Spain map) scores near zero 
 
 test("relevanceRatio folds common synonyms so a wording variant scores as a full match (offline substitute for embedding-based synonymy, without an API call per candidate)", () => {
  assert.equal(relevanceRatio("앵무새 이미지.jpg","앵무새 사진"),1);
- assert.equal(relevanceRatio("앵무새 그림.png","앵무새 사진"),1);
  assert.equal(relevanceRatio("parrot picture.jpg","parrot photo"),1);
+});
+
+test("synonym folding must not corrupt unrelated words that merely contain a synonym (regression: mapping the single character '답' onto '정답' made a search for '답사' (a field trip) score 80% against '정답지' (an answer key))", () => {
+ assert.equal(relevanceRatio("2025 사회문화 정답지","답사"),0);
+});
+
+test("synonym folding must not erase meaningful content distinctions (regression: grouping 파일/자료/문서 together made a search for '문서' match '앵무새 파일' at 100%)", () => {
+ assert.equal(relevanceRatio("앵무새 파일","문서"),0);
 });
 
 test("synonym folding does not collapse genuinely different documents of the same exam (문제지 vs 정답지 must stay distinguishable)", () => {

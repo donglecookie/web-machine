@@ -133,18 +133,31 @@ export function tokenize(s:string):string[]{
 // real queries, the genuinely-needed cases here are format/wording variants like these, not
 // cross-language synonymy. It also keeps the zero-API fallback path working when credits run
 // out, which an embedding-based ranker could not.
+// Kept deliberately narrow. Two failure modes ruled entries out, both caught by measuring
+// rather than by inspection:
+//  - Short terms corrupt unrelated words they happen to sit inside: with "답" mapped onto
+//    "정답", a search for "답사" (a field trip) scored 80% against "정답지" (an answer key),
+//    two completely unrelated things. Nothing shorter than two characters, and nothing that
+//    is a common substring of unrelated vocabulary.
+//  - Over-broad grouping erases distinctions that matter: folding 파일/자료/문서 together made
+//    a search for "문서" (document) match "앵무새 파일" (a parrot file) at 100%, because it
+//    reduced a meaningful content distinction to a single generic word.
+// What remains is only near-exact restatements of the same thing.
 const SYNONYM_GROUPS:string[][]=[
- ["사진","이미지","그림"],
+ ["사진","이미지"],
  ["문제지","문제"],
- ["정답지","정답","답"],
+ ["정답지","정답"],
  ["해설지","해설"],
- ["파일","자료","문서"],
- ["photo","image","picture","pic"],
- ["document","file","doc"],
+ ["photo","picture"],
 ];
 const SYNONYM_CANONICAL=new Map<string,string>(
  SYNONYM_GROUPS.flatMap(group=>group.map(word=>[word,group[0]] as [string,string]))
 );
+// Guard the rule above mechanically: a one-character entry is the exact shape that silently
+// corrupted unrelated words before, and a comment alone wouldn't stop it being re-added.
+for(const word of SYNONYM_CANONICAL.keys()){
+ if(word.length<2)throw new Error(`SYNONYM_GROUPS entry "${word}" is too short - single characters match inside unrelated words and corrupt them.`);
+}
 // Longest-first so a longer term is canonicalized before a shorter one that is its prefix
 // (e.g. "정답지" must not be partially rewritten by the "정답" rule first).
 const SYNONYM_RE=new RegExp([...SYNONYM_CANONICAL.keys()].sort((a,b)=>b.length-a.length).join("|"),"g");

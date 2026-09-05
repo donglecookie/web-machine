@@ -1,7 +1,6 @@
 import {test} from "node:test";
 import assert from "node:assert/strict";
-import {RunState,RECENT_REJECTS_SHOWN} from "./runState.js";
-import {newBudget} from "./resolver.js";
+import {RunState,RECENT_REJECTS_SHOWN,newBudget,exhaustBudget} from "./runState.js";
 
 const mk=(o:Partial<{buttonCap:number;linkCap:number;mainScopeMissLimit:number}>={})=>
  new RunState({buttonCap:o.buttonCap??30,linkCap:o.linkCap??15,mainScopeMissLimit:o.mainScopeMissLimit??1});
@@ -55,10 +54,9 @@ test("RunState.claimDegradedNotice returns true exactly once, so a one-off warni
  assert.equal(s.claimDegradedNotice(),false);
 });
 
-test("RunState.exhaustBudget marks the LLM path spent for the rest of the run", () => {
- const s=mk();
+test("exhaustBudget marks the LLM path spent for the rest of the run", () => {
  const budget=newBudget(20);
  budget.llmCalls=3;
- s.exhaustBudget(budget);
+ exhaustBudget(budget);
  assert.ok(budget.llmCalls>=budget.maxLlmCalls);
 });

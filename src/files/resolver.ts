@@ -3,7 +3,10 @@ import {KEYWORD_RE,SUBMIT_INTENT_RE,RESET_INTENT_RE,DESTRUCTIVE_INTENT_RE,sameHo
 import type {Stagehand,Page,Locator,StagehandClientObserveOptions} from "@browserbasehq/stagehand";
 import {readdir} from "node:fs/promises";
 import {logger} from "../runtime/logger.js";
-import {RunState} from "./runState.js";
+import {RunState,shrinkCandidateCap,exhaustBudget,newBudget,type Budget} from "./runState.js";
+// Re-exported so existing importers (WebMachine, discover, tests) keep a single import site
+// even though these now live with the run-state they belong to.
+export {newBudget,shrinkCandidateCap,exhaustBudget,type Budget} from "./runState.js";
 
 // A single recorded step: what was clicked, on which page. Typed rather than `any` so that
 // e.g. reading `.action.kind` or `.url` is checked - these fields are read in several places
@@ -25,7 +28,6 @@ const TOP_N_BUTTON=30;
 const TOP_N_LINK=15;
 const RECAP_STEPS=8;
 const DOWNLOADS_DIR="downloads";
-const DEFAULT_MAX_LLM_CALLS=20;
 const MAIN_SCOPE_MISS_LIMIT=1;
 // Soft ceiling for our own prompt text. Set well under the smallest provider limit seen in
 // practice (Groq's free tier at 8000 TPM) because our text is only PART of what gets sent -
@@ -94,13 +96,6 @@ export function pickFallbackCandidate(candidates:Candidate[],score:(c:Candidate)
   ||byRelevance.find(c=>c.kind==="button"||c.kind==="link");
 }
 
-// A per-run cap on actual LLM calls (observe + act), independent of maxSteps. maxSteps alone
-// doesn't bound cost: a single "step" can trigger an observe() plus one or two act() calls
-// (self-heal fallback, search-box typing). Passing one Budget across multiple resolve() calls
-// (e.g. across several candidate sites in discoverAndFetch) lets the caller cap total spend
-// for the whole job, not just per site.
-export type Budget={llmCalls:number;maxLlmCalls:number};
-export function newBudget(maxLlmCalls=DEFAULT_MAX_LLM_CALLS):Budget{return{llmCalls:0,maxLlmCalls};}
 
 // Distinguishes the two provider-error shapes resolve() needs to react to differently, purely
 // from the error message text (no page/network dependency, independently testable):
@@ -116,10 +111,6 @@ export function classifyObserveError(message:string):ObserveErrorKind{
  return"other";
 }
 
-// Halves the candidate cap (with a floor so it never shrinks to the point of excluding
-// everything) in response to a request-too-large error - adaptive to this run only, not a
-// global default, since a provider with more headroom shouldn't be penalized by a cap sized
-// for this one's limit.
 // Rough token estimate for a prompt string, used to shrink oversized prompts BEFORE sending
 // rather than only reacting to a provider rejection afterwards (a rejected call is pure waste:
 // it costs a full round-trip and returns nothing). Deliberately a cheap heuristic, not a real
@@ -132,10 +123,6 @@ export function estimateTokens(text:string):number{
  for(const ch of text)if(/[\u3000-\u9fff\uac00-\ud7af\uff00-\uffef]/.test(ch))cjk++;
  const ascii=text.length-cjk;
  return Math.ceil(cjk/1.5+ascii/4);
-}
-
-export function shrinkCandidateCap(cap:{button:number;link:number}):{button:number;link:number}{
- return{button:Math.max(10,Math.floor(cap.button/2)),link:Math.max(5,Math.floor(cap.link/2))};
 }
 
 // A fixed candidate count can never be "right" for every site - some pages have 3 relevant
@@ -441,7 +428,7 @@ Never log out, delete, purchase, subscribe, or make other irreversible changes.`
     // are certain to fail. Treat it like budget exhaustion: stop attempting the LLM path for
     // the remainder of this run and rely on the free mechanical fallback instead.
     if(errorKind==="credits-exhausted"){
-     state.exhaustBudget(budget);
+     exhaustBudget(budget);
      if(state.claimDegradedNotice())logger.warn("resolve.credits_exhausted",{action:"continuing with free heuristic clicks only"});
     }else if(errorKind==="request-too-large"){
      // Unlike the credits case above, waiting would NOT help here either - retrying sends the
