@@ -95,13 +95,23 @@ test("pickFallbackCandidate prefers a higher-scoring non-nav candidate over a lo
  assert.equal(picked?.selector,"b");
 });
 
-test("pickFallbackCandidate avoids nav (chrome/menu) candidates when a non-nav option exists, even if the nav one scores higher", () => {
+test("pickFallbackCandidate breaks an exact tie in favor of the non-nav candidate", () => {
  const candidates:any=[
   {kind:"link",nav:true,text:"홈",selector:"nav1",url:"https://x.com/"},
   {kind:"button",nav:false,text:"고3",selector:"content1"},
  ];
  const picked=pickFallbackCandidate(candidates,()=>0);
  assert.equal(picked?.selector,"content1");
+});
+
+test("pickFallbackCandidate lets a genuinely more relevant nav candidate win over a barely-relevant non-nav one (regression: excluding nav candidates outright once picked a WRONG-YEAR non-nav link over a nav-marked sidebar link that literally contained the correct year and scored higher)", () => {
+ const candidates:any=[
+  {kind:"link",nav:true,text:"2025년",selector:"nav1"},          // correct year, lives in a sidebar (nav)
+  {kind:"link",nav:false,text:"2027학년도 9월 모의고사",selector:"content1"}, // wrong year, but not nav
+ ];
+ const scores:Record<string,number>={nav1:1,content1:0.5};
+ const picked=pickFallbackCandidate(candidates,c=>scores[c.selector??""]??0);
+ assert.equal(picked?.selector,"nav1","a clearly more relevant nav candidate should still win, not be excluded outright");
 });
 
 test("pickFallbackCandidate falls back to a nav candidate only when nothing else is available", () => {

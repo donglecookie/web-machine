@@ -90,9 +90,24 @@ export function evaluatePick(params:{
 // DOM order (a genuinely matching filter/result can sit later in the DOM than several
 // irrelevant ones, and raw-order selection would pick the wrong one first).
 export function pickFallbackCandidate(candidates:Candidate[],score:(c:Candidate)=>number):Candidate|undefined{
- const byRelevance=[...candidates].sort((a,b)=>score(b)-score(a));
- return byRelevance.find(c=>!c.nav&&(c.kind==="button"||c.kind==="link"))
-  ||byRelevance.find(c=>c.kind==="button"||c.kind==="link");
+ // Nav candidates (menu/chrome links) get a modest penalty rather than being excluded
+ // outright: blindly clicking generic chrome is usually unproductive, but "nav" is a
+ // structural label (dom.ts marks anything inside <nav>/<header>), not a relevance judgment -
+ // a sidebar category filter link can be exactly the right pick despite living in that
+ // structure. Excluding nav candidates unconditionally was observed to pick a WRONG-YEAR
+ // non-nav link ("2027학년도 9월 모의평가") over a nav-marked sidebar link that literally
+ // contained the correct year ("2025년") and scored higher once relevance was computed -
+ // discounting instead of excluding lets a genuinely more relevant nav candidate still win,
+ // while ties still go to non-nav (see the explicit tie-break below).
+ const NAV_PENALTY=0.7;
+ const effectiveScore=(c:Candidate)=>score(c)*(c.nav?NAV_PENALTY:1);
+ return [...candidates]
+  .filter(c=>c.kind==="button"||c.kind==="link")
+  .sort((a,b)=>{
+   const diff=effectiveScore(b)-effectiveScore(a);
+   if(diff!==0)return diff;
+   return(a.nav?1:0)-(b.nav?1:0); // tie -> prefer non-nav
+  })[0];
 }
 
 
