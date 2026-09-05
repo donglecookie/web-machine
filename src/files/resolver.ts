@@ -306,11 +306,28 @@ Never log out, delete, purchase, subscribe, or make other irreversible changes.`
     // oversized-request failures seen repeatedly against small-TPM providers. Falls back to
     // an unscoped call (one extra LLM call, only in this case) if "main" doesn't exist on
     // this page or happens to miss the real candidates.
+    // Both `locator` and `ignoreLocators` take actual page.locator(...) objects, not raw
+    // selector strings - passing plain strings compiles fine here (this file works with
+    // `page`/`stagehand` typed as `any`) but is silently wrong or throws at runtime.
+    // page.locator() itself accepts both bare CSS selectors and "xpath=..."-prefixed strings,
+    // which covers the mixed formats `clicked` can contain (our own CSS-path selectors and
+    // observe()'s own xpath selectors).
+    const toLocator=(sel:string)=>{try{return page.locator(sel);}catch{return null;}};
+    // Structurally exclude already-tried selectors from observe()'s own live-page reasoning,
+    // not just from the candidate text we show it: observe() inspects the real page
+    // independently of our summarized candidate list and can (and does, in practice) still
+    // propose an element we've already excluded there - e.g. re-suggesting the exact same
+    // search box twice in a row after it failed to produce any progress the first time.
+    // ignoreLocators removes the resolved target (and descendants) from what observe() can
+    // even see, closing that gap at the source instead of only ever catching it after the
+    // fact via stuck-loop detection.
+    const ignoreLocators=[...clicked].map(toLocator).filter(Boolean);
+    const observeOpts=(extra:Record<string,unknown>)=>({page,timeout:CALL_TIMEOUT,...(ignoreLocators.length?{ignoreLocators}:{}),...extra});
     budget.llmCalls++;
-    let obs=await stagehand.observe(promptText,{page,timeout:CALL_TIMEOUT,locator:"main"}).catch(()=>null);
+    let obs=await stagehand.observe(promptText,observeOpts({locator:page.locator("main")})).catch(()=>null);
     if(!obs?.data?.length){
      budget.llmCalls++;
-     obs=await stagehand.observe(promptText,{page,timeout:CALL_TIMEOUT});
+     obs=await stagehand.observe(promptText,observeOpts({}));
     }
     const next=obs?.data?.[0];
     const nextTarget=next?.selector?await resolveTarget(next.selector):null;
