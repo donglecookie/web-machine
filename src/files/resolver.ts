@@ -354,7 +354,8 @@ Never log out, delete, purchase, subscribe, or make other irreversible changes.`
     // its schema is $strict, so an unknown/mistyped key is rejected outright at call time.
     // cache:true lets Stagehand short-circuit an identical instruction+page pair without an
     // LLM round-trip. Worth enabling here specifically because this loop retries the same
-    // instruction against the same page in several situations (the main-scope fallback below,
+    // instruction against the same page in several situations (the scoped-vs-unscoped retry
+    // when a page has <main>,
     // and steps where a click didn't change the page), which is exactly the repeat shape a
     // cache can serve.
     const observeOpts=(extra:StagehandClientObserveOptions={}):StagehandClientObserveOptions=>

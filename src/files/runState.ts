@@ -1,8 +1,8 @@
 // All of the mutable bookkeeping a single resolve() run carries, plus the rules for updating
-// it. Previously these lived as five separate `let`s scattered through a ~450-line function,
-// with each update rule (how far to shrink, warn only once, keep only the last few rejects,
-// when to stop retrying the scoped observe) inlined at its use site - so the rules were spread
-// across the file and couldn't be exercised without driving a whole browser run.
+// it. Previously these lived as separate `let`s scattered through a ~450-line function, with
+// each update rule (how far to shrink, warn only once, keep only the last few rejects)
+// inlined at its use site - so the rules were spread across the file and couldn't be
+// exercised without driving a whole browser run.
 //
 // This deliberately holds state only. Decisions stay in the pure functions (evaluatePick,
 // isFilterFlowIncomplete, pickFallbackCandidate, classifyObserveError) and the sequencing
