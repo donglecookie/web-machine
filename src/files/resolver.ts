@@ -321,7 +321,13 @@ Never log out, delete, purchase, subscribe, or make other irreversible changes.`
     // ignoreLocators removes the resolved target (and descendants) from what observe() can
     // even see, closing that gap at the source instead of only ever catching it after the
     // fact via stuck-loop detection.
-    const ignoreLocators=[...clicked].map(toLocator).filter(Boolean);
+    // Only exclude selectors that belong to the CURRENT page/URL - a selector from a page
+    // we've since navigated away from doesn't match anything here anyway, and worse, creating
+    // a live locator object against it caused real CDP frame-tracking errors in practice
+    // ("Frame with the given frameId is not found") once the site had actually navigated on
+    // since that selector was recorded.
+    const samePageSelectors=history.filter(h=>h.url===url).map(h=>h.action?.selector).filter(Boolean);
+    const ignoreLocators=[...new Set(samePageSelectors)].map(toLocator).filter(Boolean);
     const observeOpts=(extra:Record<string,unknown>)=>({page,timeout:CALL_TIMEOUT,...(ignoreLocators.length?{ignoreLocators}:{}),...extra});
     budget.llmCalls++;
     let obs=await stagehand.observe(promptText,observeOpts({locator:page.locator("main")})).catch(()=>null);
