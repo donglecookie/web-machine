@@ -210,3 +210,16 @@ test("relevanceRatioTokens: an explicit year conflict outweighs matching several
  assert.ok(correctYearAlone>wrongYearButOtherwiseMatching,"getting the year right (alone) must outrank getting the year wrong (even with other matches)");
  assert.ok(wrongYearButOtherwiseMatching<0,"an explicit year conflict should pull the score negative, not just fail to add points");
 });
+
+test("relevanceRatioTokens: the conflict penalty generalizes to month, not just year (regression: after the year fix, the exact same failure recurred one level down - a '10월' candidate with the correct year+subject won over a genuinely-absent '9월' match, for the identical reason month misses weren't penalized)", () => {
+ const tokens=tokenize("2025학년도 9월 모의평가 사회문화");
+ const wrongMonth=relevanceRatioTokens("2025년 10월 고3 모의고사 문제",tokens);
+ const correctMonth=relevanceRatioTokens("2025학년도 9월 모의평가 문제",tokens);
+ assert.ok(wrongMonth<0,"an explicit month conflict should pull the score negative, just like a year conflict");
+ assert.ok(correctMonth>wrongMonth);
+});
+
+test("relevanceRatioTokens: a candidate that simply doesn't mention any month is not penalized (only an explicit DIFFERENT month is a conflict)", () => {
+ const tokens=tokenize("2025학년도 9월 모의평가 사회문화");
+ assert.ok(relevanceRatioTokens("2025년",tokens)>0);
+});
