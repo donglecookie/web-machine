@@ -18,6 +18,7 @@ const TOP_N_LINK=15;
 const RECAP_STEPS=8;
 const DOWNLOADS_DIR="downloads";
 const DEFAULT_MAX_LLM_CALLS=20;
+const MAIN_SCOPE_MISS_LIMIT=2;
 
 // Structural/layout containers (page regions, headings) are never legitimate click targets,
 // regardless of filter-flow state - clicking one does nothing. Seen repeatedly in practice:
@@ -183,6 +184,9 @@ export async function resolve(stagehand:any,page:any,instruction:string,maxSteps
  // start at the normal defaults and only shrink if this specific provider/run turns out to
  // have a small enough per-minute token ceiling that the normal size doesn't fit.
  let candidateCap={button:TOP_N_BUTTON,link:TOP_N_LINK};
+ // How many times locator:"main" has failed to narrow anything on THIS run - once it hits
+ // MAIN_SCOPE_MISS_LIMIT, stop attempting it for the rest of this run (see the loop below).
+ let mainScopeMisses=0;
  // observe() already grounds a concrete selector, so execute it directly via the
  // Playwright-style Locator API (no LLM call) instead of re-asking the model what to do.
  // Only fall back to the LLM-driven act() (which re-reasons and self-heals) if the direct
@@ -330,7 +334,19 @@ Never log out, delete, purchase, subscribe, or make other irreversible changes.`
     const ignoreLocators=[...new Set(samePageSelectors)].map(toLocator).filter(Boolean);
     const observeOpts=(extra:Record<string,unknown>)=>({page,timeout:CALL_TIMEOUT,...(ignoreLocators.length?{ignoreLocators}:{}),...extra});
     budget.llmCalls++;
-    let obs=await stagehand.observe(promptText,observeOpts({locator:page.locator("main")})).catch(()=>null);
+    // Once locator:"main" has failed to narrow anything MAIN_SCOPE_MISS_LIMIT times, stop
+    // attempting it for the rest of this run: on a site with no <main> at all (confirmed by
+    // repeated identical misses), every attempt still costs Stagehand a real frame/AX-tree
+    // resolution internally - which was observed to throw CDP errors ("Frame with the given
+    // frameId is not found") on this exact codepath once the page had navigated since the
+    // locator was last resolved. Two misses (not one) gives one fair chance for a step where
+    // main genuinely exists but happens to be empty, before concluding the SCOPE itself - not
+    // just this step's content - doesn't apply here.
+    const tryMainScope=mainScopeMisses<MAIN_SCOPE_MISS_LIMIT;
+    let obs=tryMainScope
+     ?await stagehand.observe(promptText,observeOpts({locator:page.locator("main")})).catch(()=>null)
+     :null;
+    if(tryMainScope&&!obs?.data?.length)mainScopeMisses++;
     if(!obs?.data?.length){
      budget.llmCalls++;
      obs=await stagehand.observe(promptText,observeOpts({}));
