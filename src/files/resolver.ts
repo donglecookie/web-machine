@@ -87,6 +87,28 @@ export function pickFallbackCandidate(candidates:Candidate[],score:(c:Candidate)
 export type Budget={llmCalls:number;maxLlmCalls:number};
 export function newBudget(maxLlmCalls=DEFAULT_MAX_LLM_CALLS):Budget{return{llmCalls:0,maxLlmCalls};}
 
+// Distinguishes the two provider-error shapes resolve() needs to react to differently, purely
+// from the error message text (no page/network dependency, independently testable):
+// - "credits-exhausted": a payment/balance error. Permanent for the rest of this run - retrying
+//   wastes budget on calls certain to fail identically.
+// - "request-too-large": a single request already exceeds the provider's per-minute token
+//   ceiling on its own (e.g. "Limit 8000, Requested 19758"). Also not fixed by waiting - the
+//   same oversized prompt would fail again - but IS fixable by sending a smaller prompt.
+export type ObserveErrorKind="credits-exhausted"|"request-too-large"|"other";
+export function classifyObserveError(message:string):ObserveErrorKind{
+ if(/\b402\b|insufficient.*credit|requires more credits|payment required/i.test(message))return"credits-exhausted";
+ if(/request too large.*tokens per minute/i.test(message))return"request-too-large";
+ return"other";
+}
+
+// Halves the candidate cap (with a floor so it never shrinks to the point of excluding
+// everything) in response to a request-too-large error - adaptive to this run only, not a
+// global default, since a provider with more headroom shouldn't be penalized by a cap sized
+// for this one's limit.
+export function shrinkCandidateCap(cap:{button:number;link:number}):{button:number;link:number}{
+ return{button:Math.max(10,Math.floor(cap.button/2)),link:Math.max(5,Math.floor(cap.link/2))};
+}
+
 // A fixed candidate count can never be "right" for every site - some pages have 3 relevant
 // links, others have hundreds. So instead of tuning the cap to any one site's volume, rank
 // both buttons and content links by how well their own text matches the instruction (exam
@@ -306,22 +328,20 @@ Never log out, delete, purchase, subscribe, or make other irreversible changes.`
    }catch(e){
     const msg=e instanceof Error?e.message:String(e);
     console.error("observe step failed:",msg);
+    const errorKind=classifyObserveError(msg);
     // A payment/credits error (e.g. an exhausted OpenRouter balance) will fail identically on
     // every subsequent call too - retrying wastes the rest of the step budget on calls that
     // are certain to fail. Treat it like budget exhaustion: stop attempting the LLM path for
     // the remainder of this run and rely on the free mechanical fallback instead.
-    if(/\b402\b|insufficient.*credit|requires more credits|payment required/i.test(msg)){
+    if(errorKind==="credits-exhausted"){
      budget.llmCalls=budget.maxLlmCalls;
      if(!budgetWarned){console.error("resolve: LLM provider rejected the request for insufficient credits - continuing with free heuristic clicks only.");budgetWarned=true;}
-    }else if(/request too large.*tokens per minute/i.test(msg)){
-     // Unlike the payment case above, this specific message means the SINGLE request already
-     // exceeds the provider's per-minute token ceiling on its own (e.g. "Limit 8000, Requested
-     // 19758") - waiting would NOT help, since retrying sends the identical oversized prompt
-     // and fails identically again. The candidate list is what's driving prompt size on a
-     // page with many similarly-shaped buttons (seen in practice), so shrink it for the rest
-     // of this run - adaptive to this run only, not a global default, since a provider with
-     // more headroom shouldn't be penalized by a cap sized for this one's limit.
-     candidateCap={button:Math.max(10,Math.floor(candidateCap.button/2)),link:Math.max(5,Math.floor(candidateCap.link/2))};
+    }else if(errorKind==="request-too-large"){
+     // Unlike the credits case above, waiting would NOT help here either - retrying sends the
+     // identical oversized prompt and fails identically again. The candidate list is what's
+     // driving prompt size on a page with many similarly-shaped buttons (seen in practice), so
+     // shrink it for the rest of this run instead.
+     candidateCap=shrinkCandidateCap(candidateCap);
      console.error(`resolve: request exceeded the provider's per-minute token limit - shrinking candidate list to ${candidateCap.button} buttons / ${candidateCap.link} links for the rest of this run.`);
     }
    }

@@ -1,6 +1,6 @@
 import {test} from "node:test";
 import assert from "node:assert/strict";
-import {isFilterFlowIncomplete,evaluatePick,pickFallbackCandidate} from "./resolver.js";
+import {isFilterFlowIncomplete,evaluatePick,pickFallbackCandidate,classifyObserveError,shrinkCandidateCap} from "./resolver.js";
 
 test("isFilterFlowIncomplete is false when history is empty (nothing picked yet)", () => {
  assert.equal(isFilterFlowIncomplete([]),false);
@@ -112,4 +112,29 @@ test("pickFallbackCandidate falls back to a nav candidate only when nothing else
 
 test("pickFallbackCandidate returns undefined for an empty candidate list", () => {
  assert.equal(pickFallbackCandidate([],()=>0),undefined);
+});
+
+test("classifyObserveError recognizes a credits/payment error (regression: the exact HTTP 402 message an exhausted OpenRouter balance produced)", () => {
+ const msg=`OpenAI-compatible endpoint error: HTTP 402 {"error":{"message":"This request requires more credits, or fewer max_tokens. You requested up to 16384 tokens, but can only afford 15745.","code":402}}`;
+ assert.equal(classifyObserveError(msg),"credits-exhausted");
+});
+
+test("classifyObserveError recognizes a request-too-large per-minute-token error (regression: the exact Groq TPM message hit repeatedly this session)", () => {
+ const msg="Request too large for model `openai/gpt-oss-120b` in organization `org_x` service tier `on_demand` on tokens per minute (TPM): Limit 8000, Requested 19758, please reduce your message size and try again.";
+ assert.equal(classifyObserveError(msg),"request-too-large");
+});
+
+test("classifyObserveError does not misclassify an unrelated error", () => {
+ assert.equal(classifyObserveError("Navigation timeout of 60000 ms exceeded"),"other");
+});
+
+test("shrinkCandidateCap halves both button and link caps", () => {
+ assert.deepEqual(shrinkCandidateCap({button:30,link:15}),{button:15,link:7});
+});
+
+test("shrinkCandidateCap never shrinks below its floor, even after repeated calls", () => {
+ let cap={button:30,link:15};
+ for(let i=0;i<10;i++)cap=shrinkCandidateCap(cap);
+ assert.equal(cap.button,10);
+ assert.equal(cap.link,5);
 });
