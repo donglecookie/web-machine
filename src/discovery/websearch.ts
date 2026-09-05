@@ -1,5 +1,6 @@
 import {z} from "zod";
 import {HtmlMachine} from "../machine/HtmlMachine.js";
+import {logger} from "../runtime/logger.js";
 export type SearchResult={title:string;url:string};
 
 const RESULTS_SCHEMA=z.object({
@@ -56,7 +57,7 @@ async function htmlSearch(engine:string,url:string,unwrap:(u:string)=>string,noi
   seen.add(u);out.push({title:link.text,url:u});
   if(out.length>=8)break;
  }
- if(!out.length)console.error(`search: ${engine} HTML had ${allLinks.length} raw <a> tags but none matched (page length ${page.length})`);
+ if(!out.length)logger.debug("search.no_matches",{engine,rawLinks:allLinks.length,pageLength:page.length});
  return out;
 }
 
@@ -72,7 +73,7 @@ async function browserSearch(page:any,stagehand:any,query:string):Promise<Search
    RESULTS_SCHEMA,
    {page,timeout:45000}
   );
- }catch(e){console.error("search: browser fallback extract() threw:",e instanceof Error?e.message:String(e));}
+ }catch(e){logger.error("search.extract_failed",{message:e instanceof Error?e.message:String(e)});}
 
  const seen=new Set<string>();
  return((extracted?.data?.results)||[])
@@ -89,11 +90,11 @@ export async function searchWeb(page:any,stagehand:any,query:string):Promise<Sea
  const google=await htmlSearch("Google",`https://www.google.com/search?q=${encodeURIComponent(query)}&num=10`,unwrapGoogleRedirect,isGoogleNoise);
  if(google.length)return google;
 
- console.error("search: plain HTML fetch (Bing, Google) returned no results, falling back to browser+LLM extraction");
+ logger.info("search.html_fetch_empty",{engines:"bing,google",fallback:"browser+llm extraction"});
  const results=await browserSearch(page,stagehand,query);
  if(!results.length){
   const title=await page.title().catch(()=>"?");
-  console.error(`search: no usable results on "${title}" either`);
+  logger.warn("search.no_usable_results",{title});
  }
  return results;
 }

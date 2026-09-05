@@ -4,6 +4,7 @@
 // interaction (clicks, JS-rendered content, native downloads).
 
 import {KEYWORD_RE,sameHost,resolveFileUrl,FileType,ANY_FILE_TYPE} from "../discovery/patterns.js";
+import {logger} from "../runtime/logger.js";
 const DEFAULT_HEADERS={
  "User-Agent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
  "Accept-Language":"en-US,en;q=0.9"
@@ -16,10 +17,10 @@ export class HtmlMachine{
  async fetchHtml(url:string):Promise<string|null>{
   try{
    const res=await fetch(url,{headers:DEFAULT_HEADERS});
-   if(!res.ok){console.error(`HtmlMachine: fetch ${url} -> HTTP ${res.status}`);return null;}
+   if(!res.ok){logger.debug("html.fetch_failed",{url,status:res.status});return null;}
    return await res.text();
   }catch(e){
-   console.error(`HtmlMachine: fetch ${url} threw:`,e instanceof Error?e.message:String(e));
+   logger.debug("html.fetch_threw",{url,message:e instanceof Error?e.message:String(e)});
    return null;
   }
  }

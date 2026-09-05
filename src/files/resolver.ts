@@ -1,6 +1,13 @@
 import {inspect,Candidate} from "../discovery/dom.js";
 import {KEYWORD_RE,SUBMIT_INTENT_RE,RESET_INTENT_RE,DESTRUCTIVE_INTENT_RE,sameHost,resolveFileUrl,tokenize,relevanceRatioTokens,computeTokenWeights,detectFileType,FileType} from "../discovery/patterns.js";
+import type {Stagehand,Page,Locator,StagehandClientObserveOptions} from "@browserbasehq/stagehand";
 import {readdir} from "node:fs/promises";
+import {logger} from "../runtime/logger.js";
+
+// A single recorded step: what was clicked, on which page. Typed rather than `any` so that
+// e.g. reading `.action.kind` or `.url` is checked - these fields are read in several places
+// (filter-flow detection, ignoreLocators scoping, relevance checking in WebMachine).
+export type HistoryEntry={url:string;action:Candidate|{kind:string;text?:string;selector?:string;url?:string;nav?:boolean;score?:number}};
 
 // Strategy order (most general/common first, most site-specific last):
 // 1. Direct match already visible on the page (PDF link / same-site download) - zero LLM calls
@@ -19,6 +26,12 @@ const RECAP_STEPS=8;
 const DOWNLOADS_DIR="downloads";
 const DEFAULT_MAX_LLM_CALLS=20;
 const MAIN_SCOPE_MISS_LIMIT=1;
+// Soft ceiling for our own prompt text. Set well under the smallest provider limit seen in
+// practice (Groq's free tier at 8000 TPM) because our text is only PART of what gets sent -
+// Stagehand adds its own accessibility-tree snapshot of the page on top, and that portion is
+// not something this estimate can see. Leaving that much headroom is what makes the estimate
+// useful despite being approximate.
+const PROMPT_TOKEN_SOFT_LIMIT=2500;
 
 // Structural/layout containers (page regions, headings) are never legitimate click targets,
 // regardless of filter-flow state - clicking one does nothing. Seen repeatedly in practice:
@@ -32,7 +45,7 @@ const NON_INTERACTIVE_TAGS=new Set(["HEADER","MAIN","NAV","SECTION","ARTICLE","A
 // look like filter/category picks (button clicks, not a submit action) but nothing matching
 // search/submit intent has happened yet, the flow is incomplete. Pure function over history
 // alone, independently testable without any browser/page dependency.
-export function isFilterFlowIncomplete(history:any[]):boolean{
+export function isFilterFlowIncomplete(history:HistoryEntry[]):boolean{
  const hasPickedFilter=history.some(h=>h.action?.kind==="button"&&!h.action?.nav&&!SUBMIT_INTENT_RE.test(h.action?.text||""));
  const hasSubmitted=history.some(h=>SUBMIT_INTENT_RE.test(h.action?.text||""));
  return hasPickedFilter&&!hasSubmitted;
@@ -106,6 +119,20 @@ export function classifyObserveError(message:string):ObserveErrorKind{
 // everything) in response to a request-too-large error - adaptive to this run only, not a
 // global default, since a provider with more headroom shouldn't be penalized by a cap sized
 // for this one's limit.
+// Rough token estimate for a prompt string, used to shrink oversized prompts BEFORE sending
+// rather than only reacting to a provider rejection afterwards (a rejected call is pure waste:
+// it costs a full round-trip and returns nothing). Deliberately a cheap heuristic, not a real
+// tokenizer - loading one would add a dependency and startup cost to save a rejection that
+// this approximation already avoids. Chars-per-token differs sharply by script: ASCII averages
+// ~4, but CJK (this project's common case) is closer to ~1.5, so they're counted separately
+// instead of applying one average that would badly under-count Korean prompts.
+export function estimateTokens(text:string):number{
+ let cjk=0;
+ for(const ch of text)if(/[\u3000-\u9fff\uac00-\ud7af\uff00-\uffef]/.test(ch))cjk++;
+ const ascii=text.length-cjk;
+ return Math.ceil(cjk/1.5+ascii/4);
+}
+
 export function shrinkCandidateCap(cap:{button:number;link:number}):{button:number;link:number}{
  return{button:Math.max(10,Math.floor(cap.button/2)),link:Math.max(5,Math.floor(cap.link/2))};
 }
@@ -132,10 +159,10 @@ function summarize(candidates:Candidate[],score:(c:Candidate)=>number,cap:{butto
 // Short-term memory of what this same resolve() run has already tried, so multi-step flows
 // (e.g. selecting several filters before a search button becomes meaningful) aren't repeated
 // or forgotten between steps - each LLM call otherwise reasons from a blank slate.
-function recap(history:any[]):string{
+function recap(history:HistoryEntry[]):string{
  const recent=history.slice(-RECAP_STEPS);
  if(!recent.length)return"(none - first step)";
- return recent.map((h,i)=>`${i+1}. "${h.action?.text||h.action?.description||"?"}"`).join("\n");
+ return recent.map((h,i)=>`${i+1}. "${h.action?.text||"?"}"`).join("\n");
 }
 
 function isSamePageHash(candidateUrl:string,currentUrl:string):boolean{
@@ -159,19 +186,19 @@ async function newDownloadedFile(before:Set<string>):Promise<string|null>{
 
 // A click can open a new tab or kill the old tab's session (common for JS-driven download
 // buttons/popups). After acting, re-sync to whichever page is actually alive/current.
-async function syncActivePage(stagehand:any,current:any):Promise<any>{
+async function syncActivePage(stagehand:Stagehand,current:Page):Promise<Page>{
  try{
   const pages=await stagehand.browser.context.pages();
   if(!pages.length)return current;
   if(current){
-   try{if(pages.some((p:any)=>p.pageId===current.pageId))return current;}catch{}
+   try{if(pages.some(p=>p.pageId===current.pageId))return current;}catch{}
   }
   return pages[pages.length-1];
  }catch{return current;}
 }
 
-export async function resolve(stagehand:any,page:any,instruction:string,maxSteps=8,budget:Budget=newBudget()){
- const history:any[]=[];
+export async function resolve(stagehand:Stagehand,page:Page,instruction:string,maxSteps=8,budget:Budget=newBudget()){
+ const history:HistoryEntry[]=[];
  let budgetWarned=false;
  const fileType:FileType=detectFileType(instruction);
  const instructionTokens=tokenize(instruction); // instruction never changes across this run - tokenize once, not per loop iteration
@@ -200,7 +227,7 @@ export async function resolve(stagehand:any,page:any,instruction:string,maxSteps
    ()=>{clearTimeout(timer);settle(false);}
   );
  });
- const act=(target:any)=>{budget.llmCalls++;return stagehand.act(target,{page,timeout:CALL_TIMEOUT}).then(()=>true,()=>false);};
+ const act=(target:string)=>{budget.llmCalls++;return stagehand.act(target,{page,timeout:CALL_TIMEOUT}).then(()=>true,()=>false);};
  const click=async(selector:string,fallbackInstruction:string)=>await clickFast(selector)||await act(fallbackInstruction);
 
  // observe()'s xpath selectors and our own dom.ts CSS-path selectors are different formats
@@ -286,13 +313,13 @@ export async function resolve(stagehand:any,page:any,instruction:string,maxSteps
   let actionText="";
   if(budget.llmCalls<budget.maxLlmCalls){
    try{
-    const promptText=`Goal: find "${instruction}".
+    const buildPrompt=(cap:{button:number;link:number})=>`Goal: find "${instruction}".
 
 Prior actions (excluded from candidates below; use to judge if a filter flow is still in progress):
 ${recap(history)}${rejectedPicks.length?`\nAlready rejected, don't re-suggest: ${rejectedPicks.slice(-5).join("; ")}`:""}
 
 Page candidates:
-${summarize(freshCandidates,scoreCandidate,candidateCap)}
+${summarize(freshCandidates,scoreCandidate,cap)}
 
 Next action:
 - Filters set but not submitted yet -> finish filters or submit first, even if a tempting result link is visible (it may be from an unrelated list).
@@ -302,6 +329,18 @@ Next action:
 - Else -> most specific nav, not generic links.
 Pick only real clickable buttons/links, never headings or labels.
 Never log out, delete, purchase, subscribe, or make other irreversible changes.`;
+    // Shrink the prompt BEFORE sending if it already looks too big for the provider, instead
+    // of only reacting to a rejection after the fact - a rejected call costs a full round-trip
+    // and yields nothing. Uses the same shrink step as the post-rejection path so both
+    // converge on the same floor, and stops as soon as it fits or can't shrink further.
+    let effectiveCap=candidateCap;
+    let promptText=buildPrompt(effectiveCap);
+    while(estimateTokens(promptText)>PROMPT_TOKEN_SOFT_LIMIT){
+     const next=shrinkCandidateCap(effectiveCap);
+     if(next.button===effectiveCap.button&&next.link===effectiveCap.link)break;
+     effectiveCap=next;
+     promptText=buildPrompt(effectiveCap);
+    }
     // Scoping observe() to the page's main content area, when one exists, cuts the
     // accessibility-tree snapshot Stagehand builds internally down to just that container
     // instead of the whole page (including header/nav/footer chrome we never care about) -
@@ -330,9 +369,18 @@ Never log out, delete, purchase, subscribe, or make other irreversible changes.`
     // a live locator object against it caused real CDP frame-tracking errors in practice
     // ("Frame with the given frameId is not found") once the site had actually navigated on
     // since that selector was recorded.
-    const samePageSelectors=history.filter(h=>h.url===url).map(h=>h.action?.selector).filter(Boolean);
-    const ignoreLocators=[...new Set(samePageSelectors)].map(toLocator).filter(Boolean);
-    const observeOpts=(extra:Record<string,unknown>)=>({page,timeout:CALL_TIMEOUT,...(ignoreLocators.length?{ignoreLocators}:{}),...extra});
+    const samePageSelectors=history.filter(h=>h.url===url).map(h=>h.action?.selector).filter((s):s is string=>Boolean(s));
+    const ignoreLocators=[...new Set(samePageSelectors)].map(toLocator).filter((l):l is Locator=>l!==null);
+    // Typed against Stagehand's own options type (not Record<string,unknown>) so a wrong key
+    // or wrong value type is a compile error here rather than a runtime schema rejection -
+    // its schema is $strict, so an unknown/mistyped key is rejected outright at call time.
+    // cache:true lets Stagehand short-circuit an identical instruction+page pair without an
+    // LLM round-trip. Worth enabling here specifically because this loop retries the same
+    // instruction against the same page in several situations (the main-scope fallback below,
+    // and steps where a click didn't change the page), which is exactly the repeat shape a
+    // cache can serve.
+    const observeOpts=(extra:StagehandClientObserveOptions={}):StagehandClientObserveOptions=>
+     ({page,timeout:CALL_TIMEOUT,cache:true,...(ignoreLocators.length?{ignoreLocators}:{}),...extra});
     budget.llmCalls++;
     // Once locator:"main" has failed to narrow anything MAIN_SCOPE_MISS_LIMIT times, stop
     // attempting it for the rest of this run: on a site with no <main> at all, every attempt
@@ -346,10 +394,22 @@ Never log out, delete, purchase, subscribe, or make other irreversible changes.`
     // second, deliberately-more-lenient chance wasn't actually buying any real safety margin,
     // just an extra guaranteed-repeat error.
     const tryMainScope=mainScopeMisses<MAIN_SCOPE_MISS_LIMIT;
-    let obs=tryMainScope
-     ?await stagehand.observe(promptText,observeOpts({locator:page.locator("main")})).catch(()=>null)
-     :null;
-    if(tryMainScope&&!obs?.data?.length)mainScopeMisses++;
+    // The scoped attempt swallows its error so an unusable locator can fall through to the
+    // unscoped retry - but NOT every error deserves that retry. A provider-level failure
+    // (exhausted credits, prompt already over the token ceiling) will fail identically on the
+    // retry, so re-raise those immediately and let the handler below react once, instead of
+    // silently spending a second doomed call on every single step.
+    let obs=null;
+    if(tryMainScope){
+     try{
+      obs=await stagehand.observe(promptText,observeOpts({locator:page.locator("main")}));
+     }catch(scopedErr){
+      const kind=classifyObserveError(scopedErr instanceof Error?scopedErr.message:String(scopedErr));
+      if(kind!=="other")throw scopedErr;
+      obs=null;
+     }
+     if(!obs?.data?.length)mainScopeMisses++;
+    }
     if(!obs?.data?.length){
      budget.llmCalls++;
      obs=await stagehand.observe(promptText,observeOpts({}));
@@ -378,11 +438,11 @@ Never log out, delete, purchase, subscribe, or make other irreversible changes.`
      acted=true;
     }else if(evaluation.reject){
      rejectedPicks.push(nextText);
-     console.error(`resolve: rejected observe() pick "${next.description}" - it ${evaluation.reason}; falling back to mechanical selection.`);
+     logger.warn("resolve.pick_rejected",{pick:next.description,reason:evaluation.reason,fallback:"mechanical"});
     }
    }catch(e){
     const msg=e instanceof Error?e.message:String(e);
-    console.error("observe step failed:",msg);
+    logger.error("resolve.observe_failed",{message:msg});
     const errorKind=classifyObserveError(msg);
     // A payment/credits error (e.g. an exhausted OpenRouter balance) will fail identically on
     // every subsequent call too - retrying wastes the rest of the step budget on calls that
@@ -390,18 +450,18 @@ Never log out, delete, purchase, subscribe, or make other irreversible changes.`
     // the remainder of this run and rely on the free mechanical fallback instead.
     if(errorKind==="credits-exhausted"){
      budget.llmCalls=budget.maxLlmCalls;
-     if(!budgetWarned){console.error("resolve: LLM provider rejected the request for insufficient credits - continuing with free heuristic clicks only.");budgetWarned=true;}
+     if(!budgetWarned){logger.warn("resolve.credits_exhausted",{action:"continuing with free heuristic clicks only"});budgetWarned=true;}
     }else if(errorKind==="request-too-large"){
      // Unlike the credits case above, waiting would NOT help here either - retrying sends the
      // identical oversized prompt and fails identically again. The candidate list is what's
      // driving prompt size on a page with many similarly-shaped buttons (seen in practice), so
      // shrink it for the rest of this run instead.
      candidateCap=shrinkCandidateCap(candidateCap);
-     console.error(`resolve: request exceeded the provider's per-minute token limit - shrinking candidate list to ${candidateCap.button} buttons / ${candidateCap.link} links for the rest of this run.`);
+     logger.warn("resolve.request_too_large",{buttons:candidateCap.button,links:candidateCap.link,scope:"rest of this run"});
     }
    }
   }else if(!budgetWarned){
-   console.error(`resolve: LLM call budget exhausted (${budget.maxLlmCalls}) - continuing with free heuristic clicks only.`);
+   logger.warn("resolve.budget_exhausted",{maxLlmCalls:budget.maxLlmCalls,action:"continuing with free heuristic clicks only"});
    budgetWarned=true;
   }
 
@@ -427,7 +487,7 @@ Never log out, delete, purchase, subscribe, or make other irreversible changes.`
   // multi-step filter flows entirely through client-side state on one URL.)
   const prev=history[history.length-2]?.action?.selector;
   if(selector&&selector===prev){
-   console.error(`resolve: clicked the same element twice in a row ("${selector}") with no detectable file/download - stopping.`);
+   logger.warn("resolve.stuck_loop",{selector,action:"stopping"});
    break;
   }
 
@@ -442,7 +502,7 @@ Never log out, delete, purchase, subscribe, or make other irreversible changes.`
   const postClickUrl=await page.url().catch(()=>"");
   const resolvedPostClickUrl=resolveFileUrl(postClickUrl,fileType);
   if(resolvedPostClickUrl)return{ok:true,url:resolvedPostClickUrl,history};
-  if(KEYWORD_RE.test(actionText))console.error(`resolve: after clicking "${actionText}", current URL is: ${postClickUrl} (unchanged from before: ${postClickUrl===url})`);
+  if(KEYWORD_RE.test(actionText))logger.debug("resolve.download_click_no_change",{action:actionText,url:postClickUrl,unchanged:postClickUrl===url});
  }
  return{ok:false,history};
 }

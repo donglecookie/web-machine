@@ -7,27 +7,27 @@ test("isFilterFlowIncomplete is false when history is empty (nothing picked yet)
 });
 
 test("isFilterFlowIncomplete is true after a filter button is picked but no submit yet", () => {
- const history=[{action:{kind:"button",nav:false,text:"9월"}}];
+ const history=[{url:"https://x.test/",action:{kind:"button",nav:false,text:"9월"}}];
  assert.equal(isFilterFlowIncomplete(history),true);
 });
 
 test("isFilterFlowIncomplete is false once a submit/search action has happened", () => {
  const history=[
-  {action:{kind:"button",nav:false,text:"9월"}},
-  {action:{kind:"button",nav:false,text:"모의고사 찾기"}},
+  {url:"https://x.test/",action:{kind:"button",nav:false,text:"9월"}},
+  {url:"https://x.test/",action:{kind:"button",nav:false,text:"모의고사 찾기"}},
  ];
  assert.equal(isFilterFlowIncomplete(history),false);
 });
 
 test("isFilterFlowIncomplete ignores nav clicks (they aren't filter picks)", () => {
- const history=[{action:{kind:"button",nav:true,text:"메뉴 열기"}}];
+ const history=[{url:"https://x.test/",action:{kind:"button",nav:true,text:"메뉴 열기"}}];
  assert.equal(isFilterFlowIncomplete(history),false);
 });
 
 test("isFilterFlowIncomplete regression: a filter-reset button's own text ('필터') must not itself count as a submit action", () => {
  const history=[
-  {action:{kind:"button",nav:false,text:"9월"}},
-  {action:{kind:"button",nav:false,text:"선택된 필터 모두 지우기"}},
+  {url:"https://x.test/",action:{kind:"button",nav:false,text:"9월"}},
+  {url:"https://x.test/",action:{kind:"button",nav:false,text:"선택된 필터 모두 지우기"}},
  ];
  assert.equal(isFilterFlowIncomplete(history),true);
 });
