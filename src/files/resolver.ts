@@ -89,7 +89,13 @@ export function evaluatePick(params:{
 // than to make real progress - and rank by relevance to the instruction first rather than raw
 // DOM order (a genuinely matching filter/result can sit later in the DOM than several
 // irrelevant ones, and raw-order selection would pick the wrong one first).
-export function pickFallbackCandidate(candidates:Candidate[],score:(c:Candidate)=>number):Candidate|undefined{
+// The judgment-free mechanical fallback's candidate ranking: prefer non-nav (content/filter)
+// candidates over generic chrome (menu/home links) - with no LLM guidance, blindly clicking a
+// nav link is far more likely to reset/reload the page (losing any expanded filter state)
+// than to make real progress - and rank by relevance to the instruction first rather than raw
+// DOM order (a genuinely matching filter/result can sit later in the DOM than several
+// irrelevant ones, and raw-order selection would pick the wrong one first).
+export function rankFallbackCandidates(candidates:Candidate[],score:(c:Candidate)=>number):Candidate[]{
  // Nav candidates (menu/chrome links) get a modest penalty rather than being excluded
  // outright: blindly clicking generic chrome is usually unproductive, but "nav" is a
  // structural label (dom.ts marks anything inside <nav>/<header>), not a relevance judgment -
@@ -107,7 +113,15 @@ export function pickFallbackCandidate(candidates:Candidate[],score:(c:Candidate)
    const diff=effectiveScore(b)-effectiveScore(a);
    if(diff!==0)return diff;
    return(a.nav?1:0)-(b.nav?1:0); // tie -> prefer non-nav
-  })[0];
+  });
+}
+
+// Convenience wrapper for the common case of just wanting the single best candidate - the
+// resolve() loop itself uses rankFallbackCandidates directly so it can retry the next-best
+// candidate if the top one turns out not to be actually clickable (e.g. hidden inside a
+// collapsed menu the DOM scan can't distinguish from a normal link before attempting a click).
+export function pickFallbackCandidate(candidates:Candidate[],score:(c:Candidate)=>number):Candidate|undefined{
+ return rankFallbackCandidates(candidates,score)[0];
 }
 
 
@@ -464,23 +478,35 @@ Never log out, delete, purchase, subscribe, or make other irreversible changes.`
 
   if(!acted){
    // clickFast() only (never the LLM self-heal fallback) so this path stays free even once
-   // the budget is spent. See pickFallbackCandidate for the selection policy itself.
-   const action=pickFallbackCandidate(freshCandidates,scoreCandidate);
-   if(!action)break;
-   selector=action.selector;
-   actionText=action.text||"";
-   history.push({url,action});
-   // Try the stable data-wm-id selector first, then the structural path: if the page replaced
-   // the node between scraping and clicking, our injected attribute went with it, and the
-   // structural path is the only remaining handle.
-   const fallbackSelector=("fallbackSelector" in action?action.fallbackSelector:undefined);
-   const ok=action.selector
-    ?await clickFast(action.selector)||(fallbackSelector?await clickFast(fallbackSelector):false)
-    :action.url
-    ?await page.goto(action.url,{waitUntil:"domcontentloaded",timeout:CALL_TIMEOUT}).then(()=>true,()=>false)
-    :false;
-   if(!ok)break;
-   acted=true;
+   // the budget is spent. See rankFallbackCandidates for the ranking policy itself.
+   //
+   // Tries a few top-ranked candidates in order, not just the single best one: the DOM scan
+   // can't always tell a genuinely clickable element from one that's structurally present but
+   // not actually interactable (e.g. a link inside a collapsed/hidden nav menu) - the click
+   // itself is what reveals that. Recording history only for whichever one actually succeeds,
+   // rather than for the first attempt regardless of outcome, means one bad pick doesn't end
+   // the whole run - only exhausting the top few candidates does.
+   const FALLBACK_RETRY_LIMIT=3;
+   const ranked=rankFallbackCandidates(freshCandidates,scoreCandidate).slice(0,FALLBACK_RETRY_LIMIT);
+   for(const action of ranked){
+    // Try the stable data-wm-id selector first, then the structural path: if the page
+    // replaced the node between scraping and clicking, our injected attribute went with it,
+    // and the structural path is the only remaining handle.
+    const fallbackSelector=("fallbackSelector" in action?action.fallbackSelector:undefined);
+    const ok=action.selector
+     ?await clickFast(action.selector)||(fallbackSelector?await clickFast(fallbackSelector):false)
+     :action.url
+     ?await page.goto(action.url,{waitUntil:"domcontentloaded",timeout:CALL_TIMEOUT}).then(()=>true,()=>false)
+     :false;
+    if(ok){
+     selector=action.selector;
+     actionText=action.text||"";
+     history.push({url,action});
+     acted=true;
+     break;
+    }
+   }
+   if(!acted)break; // none of the top candidates were actually clickable - genuinely stuck
   }
 
   // Genuine stuck-loop detection: the exact same element chosen twice in a row, despite being

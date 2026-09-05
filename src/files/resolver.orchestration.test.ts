@@ -15,6 +15,9 @@ type FakeOpts={
  observeErrors?:(string|null)[]; // if set at an index, observe() throws that message instead
  urls?:string[];             // page.url() sequence; last value repeats
  hasMain?:boolean;           // whether page.locator("main").count() reports an element
+ unclickableSelectors?:string[]; // selectors whose .click() always rejects, simulating a
+                                  // structurally-present-but-not-actually-interactable element
+                                  // (e.g. hidden inside a collapsed nav menu)
 };
 
 function makeFakes(opts:FakeOpts={}){
@@ -27,7 +30,7 @@ function makeFakes(opts:FakeOpts={}){
   goto:async()=>{urlIdx++;return true;},
   locator:(sel:string)=>({
    __selector:sel,
-   click:async()=>{},
+   click:async()=>{if(opts.unclickableSelectors?.includes(sel))throw new Error("Node does not have a layout object");},
    waitFor:async()=>{},
    count:async()=>(sel==="main"?(opts.hasMain??true)?1:0:1),
   }),
@@ -152,4 +155,30 @@ test("resolve tells act() to clear the search field before typing, not just type
  const searchAct=actCalls.find(a=>a.toLowerCase().includes("search"));
  assert.ok(searchAct,"expected a search-typing act() call");
  assert.match(searchAct!,/clear/i);
+});
+
+test("resolve tries the next-best fallback candidate if the top one turns out not to be actually clickable (regression: a candidate hidden inside a collapsed nav menu is structurally present but has no layout box, so its click always fails - previously this ended the whole run on step one instead of trying anything else)", async () => {
+ const {page,stagehand}=makeFakes({
+  candidates:[
+   {kind:"link",text:"숨겨진 메뉴 항목",selector:"hidden1",nav:true},
+   {kind:"button",text:"사회문화",selector:"visible1",nav:false},
+  ],
+  unclickableSelectors:["hidden1"],
+ });
+ const out:any=await resolve(stagehand,page,"사회문화",3,newBudget(0));
+ assert.equal(out.history.at(-1)?.action?.selector,"visible1","should have moved on to the next candidate after the first failed to click");
+});
+
+test("resolve gives up only after the top few fallback candidates all fail to click, not just the first", async () => {
+ const {page,stagehand}=makeFakes({
+  candidates:[
+   {kind:"link",text:"a",selector:"h1",nav:false},
+   {kind:"link",text:"b",selector:"h2",nav:false},
+   {kind:"link",text:"c",selector:"h3",nav:false},
+  ],
+  unclickableSelectors:["h1","h2","h3"],
+ });
+ const out:any=await resolve(stagehand,page,"사회문화",3,newBudget(0));
+ assert.equal(out.ok,false);
+ assert.equal(out.history.length,0,"no history entry should be recorded for attempts that never actually succeeded");
 });

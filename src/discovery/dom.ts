@@ -36,7 +36,20 @@ const EVAL_SOURCE=`(() => {
     if (!id) { id = "wm" + (window.__wmSeq = (window.__wmSeq || 0) + 1); el.setAttribute("data-wm-id", id); }
     return id;
   }
+  function isVisible(e) {
+    // A collapsed/hidden nav menu (common: a hamburger-triggered dropdown, hidden until
+    // opened) still has its links present in the DOM, so a structural scan finds them - but
+    // clicking one fails outright ("Node does not have a layout object"), and since that
+    // click attempt is recorded in history before its result is known, a failed click on a
+    // candidate like this ends the whole run on step one instead of trying anything else.
+    // Filtering these out at scan time, not click time, means we never offer a candidate we
+    // can't actually interact with in the first place.
+    const style = getComputedStyle(e);
+    if (style.display === "none" || style.visibility === "hidden" || Number(style.opacity) === 0) return false;
+    return e.offsetWidth > 0 || e.offsetHeight > 0 || e.getClientRects().length > 0;
+  }
   function add(kind, e, url) {
+    if (!isVisible(e)) return;
     let text = (e.innerText || e.textContent || e.getAttribute("aria-label") || e.title || "").trim().replace(/\\s+/g, " ").slice(0, 300);
     if (text.length > 0 && text.length <= 6) {
       const ctx = nearbyLabel(e);
