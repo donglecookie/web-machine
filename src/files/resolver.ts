@@ -428,18 +428,18 @@ Never log out, delete, purchase, subscribe, or make other irreversible changes.`
    break;
   }
 
-  if(acted){
-   await page.waitForTimeout(3000);
-   page=await syncActivePage(stagehand,page);
-   const downloadedFile=await newDownloadedFile(beforeFiles);
-   if(downloadedFile)return{ok:true,downloadedFile,history};
-   const postClickUrl=await page.url().catch(()=>"");
-   const resolvedPostClickUrl=resolveFileUrl(postClickUrl,fileType);
-   if(resolvedPostClickUrl)return{ok:true,url:resolvedPostClickUrl,history};
-   if(KEYWORD_RE.test(actionText))console.error(`resolve: after clicking "${actionText}", current URL is: ${postClickUrl} (unchanged from before: ${postClickUrl===url})`);
-  }
-
-  await page.waitForTimeout(500);
+  // `acted` is unconditionally true by this point: every path above that leaves it false
+  // (fallback found nothing, or its click failed) already `break`s out of the loop before
+  // here, so there's nothing left to gate - and no reason to add another wait on top of the
+  // settle-time one below.
+  await page.waitForTimeout(3000);
+  page=await syncActivePage(stagehand,page);
+  const downloadedFile=await newDownloadedFile(beforeFiles);
+  if(downloadedFile)return{ok:true,downloadedFile,history};
+  const postClickUrl=await page.url().catch(()=>"");
+  const resolvedPostClickUrl=resolveFileUrl(postClickUrl,fileType);
+  if(resolvedPostClickUrl)return{ok:true,url:resolvedPostClickUrl,history};
+  if(KEYWORD_RE.test(actionText))console.error(`resolve: after clicking "${actionText}", current URL is: ${postClickUrl} (unchanged from before: ${postClickUrl===url})`);
  }
  return{ok:false,history};
 }

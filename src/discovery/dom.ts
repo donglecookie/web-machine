@@ -45,6 +45,9 @@ const EVAL_SOURCE=`(() => {
 const MAX_CANDIDATES=60;
 export async function inspect(page:any,fileType:FileType=ANY_FILE_TYPE,instructionTokens:string[]=[]):Promise<Candidate[]>{
  const xs=await page.evaluate(EVAL_SOURCE);
+ // Hoisted out of the per-candidate loop below: aliases are a small, fixed list (and already
+ // lowercase in every FILE_TYPES entry) - no reason to re-lowercase them for every candidate.
+ const lowerAliases=fileType.aliases.map(a=>a.toLowerCase());
  // This is a coarse initial ranking only - genuine relevance-to-instruction ranking (fuzzy
  // matching + candidate-pool-based token weighting) happens later in resolver.ts, once the
  // full candidate list for a step is known. But without ANY instruction-awareness here, a
@@ -59,7 +62,7 @@ export async function inspect(page:any,fileType:FileType=ANY_FILE_TYPE,instructi
  const scored=xs.map((x:any)=>{
   const s=x.text.toLowerCase();
   let score=0;
-  if(KEYWORD_RE.test(s)||fileType.aliases.some(a=>s.includes(a.toLowerCase())))score+=60;
+  if(KEYWORD_RE.test(s)||lowerAliases.some(a=>s.includes(a)))score+=60;
   if(x.kind==="download")score+=40;
   if(fileType.extRe.test(x.url||""))score+=100;
   if(instructionTokens.length)score+=relevanceRatioTokens(x.text,instructionTokens)*200;
