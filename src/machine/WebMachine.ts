@@ -6,12 +6,18 @@ const BLOCKED_DOMAINS=[
 ];
 const RELEVANCE_WARN_THRESHOLD=0.5;
 
-// The two possible shapes withRelevanceCheck accepts: a direct file URL match, or a native
-// browser download - both get the same relevance check applied before being returned.
+// What fetch() can actually return, kept accurate to what the code below produces (this was
+// found to be unenforced dead weight during a review pass - nothing declared it as a return
+// type, so nothing checked that every branch actually matched its shape; annotating fetch()
+// with it surfaced a real gap, fixed alongside this: downloadAndVerify()'s failure branch had
+// no `message` when verification itself failed, only when the download threw an exception -
+// a caller could get ok:false with no explanation of why).
 export type FetchResult=
- |{ok:true;url:string;path?:string;verification?:unknown;history:HistoryEntry[];warning?:string}
- |{ok:true;downloadedFile?:never;path:string;verification:unknown;history:HistoryEntry[];warning?:string}
- |{ok:false;message:string;history:HistoryEntry[]};
+ // url is absent for a native browser download (no plain link was ever followed, the file
+ // just appeared) - path is always present on success either way, since that's what actually
+ // got saved and verified.
+ |{ok:true;url?:string;path:string;verification:unknown;history:HistoryEntry[];warning?:string}
+ |{ok:false;message:string;history:HistoryEntry[];url?:string;path?:string;verification?:unknown};
 
 export function withRelevanceCheck<T extends {ok:boolean;path?:string;url?:string;history?:HistoryEntry[]}>(result:T,instruction:string):T&{warning?:string}{
  if(!result.ok)return result;
@@ -56,11 +62,15 @@ export class WebMachine{
    catch(e){if(attempt===1)throw e;}
   }
  }
- private async downloadAndVerify(url:string,history:HistoryEntry[],fileType:ReturnType<typeof detectFileType>){
-  try{const file=await download(url);const verification=await verify(file.path,fileType);return{ok:verification.ok,url:file.url,path:file.path,verification,history};}
-  catch(e){return{ok:false,url,message:e instanceof Error?e.message:String(e),history};}
+ private async downloadAndVerify(url:string,history:HistoryEntry[],fileType:ReturnType<typeof detectFileType>):Promise<FetchResult>{
+  try{
+   const file=await download(url);
+   const verification=await verify(file.path,fileType);
+   if(!verification.ok)return{ok:false,message:`Downloaded file failed verification (expected type: ${fileType.name}).`,url:file.url,path:file.path,verification,history};
+   return{ok:true,url:file.url,path:file.path,verification,history};
+  }catch(e){return{ok:false,url,message:e instanceof Error?e.message:String(e),history};}
  }
- async fetch(instruction:string,maxSteps=8,budget:Budget=newBudget()){
+ async fetch(instruction:string,maxSteps=8,budget:Budget=newBudget()):Promise<FetchResult>{
   const fileType=detectFileType(instruction);
   // Fast path: check the raw HTML of the current page for an obvious direct file link
   // before spinning up the full browser-driven resolve() loop.
@@ -76,7 +86,8 @@ export class WebMachine{
   if(found.downloadedFile){
    try{
     const verification=await verify(found.downloadedFile,fileType);
-    return withRelevanceCheck({ok:verification.ok,path:found.downloadedFile,verification,history:found.history},instruction);
+    if(!verification.ok)return{ok:false,message:`Downloaded file failed verification (expected type: ${fileType.name}).`,path:found.downloadedFile,verification,history:found.history};
+    return withRelevanceCheck({ok:true,path:found.downloadedFile,verification,history:found.history},instruction);
    }catch(e){return{ok:false,message:e instanceof Error?e.message:String(e),history:found.history};}
   }
   if(!found.ok||!found.url)return{ok:false,message:"No file URL found.",history:found.history};

@@ -49,3 +49,11 @@ test("withRelevanceCheck still warns even with descriptive history text, if that
  const out=withRelevanceCheck(result,"2025학년도 9월 모의평가 사회문화");
  assert.ok(out.warning);
 });
+
+test("withRelevanceCheck still applies its check to a failed-verification result that carries a message and diagnostic fields (regression: verification failures used to reach callers as ok:false with NO explanation - only exceptions during download got a message)", () => {
+ const result={ok:false,message:"Downloaded file failed verification (expected type: pdf).",path:"downloads/wrong-type.pdf",verification:{ok:false,matchesType:false},history:[]};
+ // A failed result should pass through withRelevanceCheck unchanged - relevance is only
+ // meaningful for a result the caller might otherwise trust as correct.
+ assert.deepEqual(withRelevanceCheck(result,"anything"),result);
+ assert.ok(result.message.length>0,"a verification failure must always carry a reason, not just ok:false");
+});

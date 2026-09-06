@@ -486,6 +486,14 @@ Never log out, delete, purchase, subscribe, or make other irreversible changes.`
    // itself is what reveals that. Recording history only for whichever one actually succeeds,
    // rather than for the first attempt regardless of outcome, means one bad pick doesn't end
    // the whole run - only exhausting the top few candidates does.
+   //
+   // Worst-case latency this can add: each candidate risks up to two 8s clickFast() timeouts
+   // (main selector, then its structural fallback) before moving on, so 3 candidates that all
+   // fail both ways is up to ~48s before this step gives up. Left at 3 rather than tuned
+   // lower without live-run evidence for what the right number actually is - now that
+   // dom.ts's isVisible() filters out the main real-world cause of a failed click (a
+   // structurally-present but hidden element) before it ever reaches this retry loop, this
+   // path should mostly be exercised for genuinely rare edge cases, not routinely.
    const FALLBACK_RETRY_LIMIT=3;
    const ranked=rankFallbackCandidates(freshCandidates,scoreCandidate).slice(0,FALLBACK_RETRY_LIMIT);
    for(const action of ranked){
