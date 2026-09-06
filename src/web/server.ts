@@ -3,13 +3,13 @@ import http from "node:http";
 import {randomUUID} from "node:crypto";
 import {readFile} from "node:fs/promises";
 import path from "node:path";
-import {createStagehand} from "../runtime/stagehand.js";
-import {WebMachine} from "../machine/WebMachine.js";
-import {discoverAndFetch} from "../discover.js";
+import {fileURLToPath} from "node:url";
+import {fork} from "node:child_process";
 import {logger} from "../runtime/logger.js";
 
 const PORT=Number(process.env.WEB_PORT)||3000;
 const DOWNLOADS_DIR=path.resolve("downloads");
+const WORKER_PATH=path.join(path.dirname(fileURLToPath(import.meta.url)),"worker.ts");
 
 // A search can genuinely take minutes (real browser automation, several LLM round-trips) - a
 // single request/response that blocks for that whole duration was found in practice to hit
@@ -21,7 +21,6 @@ const DOWNLOADS_DIR=path.resolve("downloads");
 // left open long enough for a proxy to consider it idle and kill it.
 type Job={status:"running"|"done"|"error";result?:unknown;startedAt:number};
 const jobs=new Map<string,Job>();
-const activeJobIds=new Set<string>(); // jobs currently inside runSearch() - see the process-level safety net below
 const JOB_TTL_MS=10*60*1000; // finished jobs are dropped after this so `jobs` doesn't grow forever across a long-running server process
 
 function sweepOldJobs():void{
@@ -29,58 +28,37 @@ function sweepOldJobs():void{
  for(const[id,job] of jobs)if(job.status!=="running"&&job.startedAt<cutoff)jobs.delete(id);
 }
 
-// This is a long-running service, not a one-shot script like src/test.ts - an error from deep
-// inside the browser-automation stack that Node treats as "uncaught" (e.g. certain child-
-// process failures surface as an unhandled 'error' event, not a promise rejection a try/catch
-// can intercept) would otherwise crash the whole process, taking down every other in-flight
-// job with it. Logging and continuing is the right behavior here specifically because each
-// job already fails independently and safely into its own job.status="error" via runSearch()'s
-// own try/catch - but an error THIS net catches bypassed that entirely, which would otherwise
-// leave whichever job caused it stuck at status:"running" forever (silently spinning on the
-// page, never resolving). Tracking which jobs are currently active lets this net mark them
-// failed too, not just keep the server itself alive.
-function failActiveJobs(message:string):void{
- for(const id of activeJobIds){
-  const job=jobs.get(id);
-  if(job)jobs.set(id,{status:"error",result:{ok:false,message},startedAt:job.startedAt});
- }
- activeJobIds.clear();
-}
-process.on("uncaughtException",e=>{
- const message=e instanceof Error?e.message:String(e);
- logger.error("web.uncaught_exception",{message});
- failActiveJobs(message);
-});
-process.on("unhandledRejection",e=>{
- const message=e instanceof Error?e.message:String(e);
- logger.error("web.unhandled_rejection",{message});
- failActiveJobs(message);
-});
-
-// One machine per job, not a shared long-lived one: each search gets a fresh browser and
-// closes it when done, mirroring how src/test.ts already behaves - a page/tab left open from a
-// previous search shouldn't silently influence the next one.
-async function runSearch(jobId:string,query:string,targetUrl:string|undefined):Promise<void>{
- activeJobIds.add(jobId);
- let machine:WebMachine|undefined;
- try{
-  const stagehand=await createStagehand();
-  machine=new WebMachine(stagehand);
-  let result:unknown;
-  if(targetUrl){
-   await machine.open(targetUrl);
-   result=await machine.fetch(query,16);
-  }else{
-   await machine.open("about:blank");
-   result=await discoverAndFetch(machine,stagehand,query);
-  }
-  jobs.set(jobId,{status:"done",result,startedAt:jobs.get(jobId)!.startedAt});
- }catch(e){
-  jobs.set(jobId,{status:"error",result:{ok:false,message:e instanceof Error?e.message:String(e)},startedAt:jobs.get(jobId)!.startedAt});
- }finally{
-  activeJobIds.delete(jobId);
-  if(machine)await machine.close().catch(()=>{});
- }
+// Runs the actual search in its OWN process (worker.ts), not inside this shared server
+// process - this is the real fix for "a search shouldn't be able to affect the server at
+// all", not just catching whatever it throws. An earlier version ran the search in-process and
+// relied on process-level uncaughtException/unhandledRejection handlers to survive a crash
+// from deep inside the browser-automation stack - but Node's own docs are explicit that
+// continuing after an uncaughtException leaves the process in an undefined state, and some
+// failure modes (a raw process.exit() somewhere in a dependency, a native-code crash) can't be
+// caught by JS-level handlers at all regardless. A genuinely separate OS process can crash any
+// way whatsoever and the only thing the parent ever sees is a normal 'exit' event - there is
+// no path from "this search misbehaved" to "the server went down" left at all, by
+// construction, not by best-effort recovery.
+// --import tsx makes the child load .ts files directly too, the same way this project's own
+// test:unit script already runs TypeScript without a separate compile step.
+function runSearchInWorker(jobId:string,query:string,targetUrl:string|undefined):void{
+ const child=fork(WORKER_PATH,[],{execArgv:["--import","tsx"]});
+ const finish=(status:"done"|"error",result:unknown)=>{
+  const job=jobs.get(jobId);
+  if(job&&job.status==="running")jobs.set(jobId,{status,result,startedAt:job.startedAt});
+  child.kill();
+ };
+ child.on("message",(msg:{ok:boolean;result:unknown})=>finish(msg.ok?"done":"error",msg.result));
+ child.on("error",e=>finish("error",{ok:false,message:`worker failed to start: ${e.message}`}));
+ child.on("exit",code=>{
+  // A worker that already reported its result via 'message' calls process.exit(0) itself
+  // right after - finish() already ran and set a real status, so this exit is expected and a
+  // no-op here (finish() only acts while status is still "running"). This branch is what
+  // catches the case the message never arrived at all: whatever went wrong, it stayed
+  // entirely inside the worker's own process.
+  if(code!==0)finish("error",{ok:false,message:`worker process exited unexpectedly (code ${code})`});
+ });
+ child.send({query,targetUrl});
 }
 
 const PAGE=`<!doctype html>
@@ -204,7 +182,7 @@ const server=http.createServer(async(req,res)=>{
    logger.info("web.run_start",{jobId,query,url:targetUrl||"(search)"});
    // Deliberately not awaited: the job runs in the background and the response returns
    // immediately, which is the whole point of the job/poll split (see the comment above).
-   runSearch(jobId,query,targetUrl);
+   runSearchInWorker(jobId,query,targetUrl);
    res.writeHead(202,{"Content-Type":"application/json"});
    res.end(JSON.stringify({jobId}));
    return;
