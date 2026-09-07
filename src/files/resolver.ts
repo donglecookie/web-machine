@@ -202,12 +202,26 @@ async function newDownloadedFile(before:Set<string>):Promise<string|null>{
 
 // A click can open a new tab or kill the old tab's session (common for JS-driven download
 // buttons/popups). After acting, re-sync to whichever page is actually alive/current.
-async function syncActivePage(stagehand:Stagehand,current:Page):Promise<Page>{
+export async function syncActivePage(stagehand:Stagehand,current:Page):Promise<Page>{
  try{
   const pages=await stagehand.browser.context.pages();
   if(!pages.length)return current;
   if(current){
-   try{if(pages.some(p=>p.pageId===current.pageId))return current;}catch{}
+   try{
+    if(pages.some(p=>p.pageId===current.pageId)){
+     // Close any OTHER tab that showed up alongside the one this run is actually using - an
+     // ad, a "sign up" popup, an affiliate redirect. Nothing in this codebase ever
+     // deliberately opens a new tab (every navigation goes through page.goto() or
+     // element.click() on the SAME page), so any additional tab is, by construction, always
+     // the site's own doing, never something this run needs. Left open, it becomes a real
+     // problem the next time this function runs: if that popup later closes/replaces what WAS
+     // the current tab, the fallback below would follow it instead, silently dragging the
+     // whole run onto content it was never trying to reach (observed in practice: a cruise
+     // booking site's own popup ad took over an in-progress search mid-run).
+     for(const p of pages)if(p.pageId!==current.pageId)p.close().catch(()=>{});
+     return current;
+    }
+   }catch{}
   }
   return pages[pages.length-1];
  }catch{return current;}

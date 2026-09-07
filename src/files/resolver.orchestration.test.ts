@@ -1,6 +1,6 @@
 import {test} from "node:test";
 import assert from "node:assert/strict";
-import {resolve,newBudget,estimateTokens} from "./resolver.js";
+import {resolve,newBudget,estimateTokens,syncActivePage} from "./resolver.js";
 
 // These exercise resolve()'s ORCHESTRATION - the loop that wires the pure decision functions
 // together (budget accounting, retry ordering, early-exit conditions). Until now only the pure
@@ -181,4 +181,30 @@ test("resolve gives up only after the top few fallback candidates all fail to cl
  const out:any=await resolve(stagehand,page,"사회문화",3,newBudget(0));
  assert.equal(out.ok,false);
  assert.equal(out.history.length,0,"no history entry should be recorded for attempts that never actually succeeded");
+});
+
+test("syncActivePage closes any OTHER tab that appeared alongside the one this run is using (regression: a site's own popup ad, if left open, could later be mistaken for the run's active tab)", async () => {
+ let closedIds:string[]=[];
+ const makePage=(pageId:string)=>({pageId,close:async()=>{closedIds.push(pageId);}});
+ const current=makePage("main");
+ const popup=makePage("popup");
+ const stagehand:any={browser:{context:{pages:async()=>[current,popup]}}};
+ const result=await syncActivePage(stagehand,current as any);
+ assert.equal(result.pageId,"main","should keep using the original tab, not switch to the popup");
+ assert.deepEqual(closedIds,["popup"],"the popup tab should have been closed");
+});
+
+test("syncActivePage does not try to close anything when there is only one tab", async () => {
+ const current={pageId:"main",close:async()=>{throw new Error("should not be called");}};
+ const stagehand:any={browser:{context:{pages:async()=>[current]}}};
+ const result=await syncActivePage(stagehand,current as any);
+ assert.equal(result.pageId,"main");
+});
+
+test("syncActivePage falls back to the newest tab if the original one is genuinely gone", async () => {
+ const current={pageId:"main"};
+ const newest={pageId:"newest",close:async()=>{}};
+ const stagehand:any={browser:{context:{pages:async()=>[newest]}}};
+ const result=await syncActivePage(stagehand,current as any);
+ assert.equal(result.pageId,"newest");
 });
