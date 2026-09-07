@@ -95,6 +95,8 @@ const PAGE=`<!doctype html>
 const f=document.getElementById("f"),statusEl=document.getElementById("status"),result=document.getElementById("result"),submit=document.getElementById("submit");
 let pollTimer=null;
 let elapsed=0;
+let consecutiveErrors=0;
+const MAX_CONSECUTIVE_ERRORS=5; // past this many network failures in a row, the server is most likely gone for good, not just a blip - stop polling silently forever and say so instead
 
 function stopPolling(){if(pollTimer){clearInterval(pollTimer);pollTimer=null;}submit.disabled=false;}
 
@@ -119,6 +121,7 @@ async function poll(jobId){
   const res=await fetch("/api/status/"+jobId);
   if(!res.ok){statusEl.textContent="상태 확인 실패 (서버가 재시작됐을 수 있어요)";stopPolling();return;}
   const data=await res.json();
+  consecutiveErrors=0;
   if(data.status==="running"){
    statusEl.textContent="찾는 중입니다... ("+elapsed+"초 경과)";
    return;
@@ -126,7 +129,13 @@ async function poll(jobId){
   renderDone(data);
   stopPolling();
  }catch(err){
-  statusEl.textContent="연결 확인 중 오류, 재시도합니다...";
+  consecutiveErrors++;
+  if(consecutiveErrors>=MAX_CONSECUTIVE_ERRORS){
+   statusEl.textContent="서버와 연결이 끊긴 것 같아요. 페이지를 새로고침한 뒤 다시 시도해 주세요.";
+   stopPolling();
+   return;
+  }
+  statusEl.textContent="연결 확인 중 오류, 재시도합니다... ("+consecutiveErrors+"/"+MAX_CONSECUTIVE_ERRORS+")";
  }
 }
 
@@ -135,6 +144,7 @@ f.addEventListener("submit",async(e)=>{
  submit.disabled=true;
  result.style.display="none";
  elapsed=0;
+ consecutiveErrors=0;
  statusEl.textContent="시작하는 중...";
  const query=document.getElementById("query").value;
  const url=document.getElementById("url").value;
