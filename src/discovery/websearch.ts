@@ -66,7 +66,16 @@ async function htmlSearch(engine:string,url:string,unwrap:(u:string)=>string,noi
 // read the results page semantically instead of relying on brittle regex/selectors.
 async function browserSearch(page:Page,stagehand:Stagehand,query:string):Promise<SearchResult[]>{
  await page.goto(`https://www.bing.com/search?q=${encodeURIComponent(query)}`,{waitUntil:"domcontentloaded",timeout:30000});
- await page.waitForSelector("#b_results",{timeout:10000}).catch(()=>{});
+ const foundResults=await page.waitForSelector("#b_results",{timeout:10000}).then(()=>true,()=>false);
+ // Diagnostic only, not a behavior change: a prior fix attempt (routing discoverAndFetch
+ // through ensurePage() instead of open("about:blank")) did NOT stop this failure from
+ // recurring, which means that diagnosis was wrong or incomplete - logging the actual
+ // landed URL/title here, rather than guessing again, is what the next occurrence needs to
+ // pin down the real cause (e.g. Bing redirecting to a bot-check page, which would show up
+ // clearly as a URL that isn't /search or a title that isn't the normal Bing results title).
+ const landedUrl=await page.url().catch(()=>"?");
+ const landedTitle=await page.title().catch(()=>"?");
+ logger.debug("search.browser_landed",{engine:"Bing",url:landedUrl,title:landedTitle,foundResultsSelector:foundResults});
  let extracted:{data?:z.infer<typeof RESULTS_SCHEMA>}|null=null;
  try{
   extracted=await stagehand.extract(
