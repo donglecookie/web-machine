@@ -9,7 +9,12 @@ const DEFAULT_HEADERS={
  "User-Agent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
  "Accept-Language":"en-US,en;q=0.9"
 };
-const LINK_RE=/<a\s+[^>]*href="([^"]+)"[^>]*>(.*?)<\/a>/gis;
+// Captures the opening quote character so the URL match stops at a matching quote of the
+// SAME kind, whichever style this page happens to use - a fixed double-quote assumption was
+// found to silently drop every link on pages using single quotes for attributes, which is
+// common enough on real sites (Bing among them) that it could explain organic result links
+// being invisible to this extractor even when the raw HTML plainly contains them.
+const LINK_RE=/<a\s+[^>]*?href\s*=\s*(["'])(.*?)\1[^>]*>(.*?)<\/a>/gis;
 
 export type HtmlLink={url:string;text:string};
 
@@ -28,7 +33,7 @@ export class HtmlMachine{
  extractLinks(html:string,baseUrl:string):HtmlLink[]{
   const out:HtmlLink[]=[];
   for(const m of html.matchAll(LINK_RE)){
-   try{out.push({url:new URL(m[1],baseUrl).href,text:m[2].replace(/<[^>]+>/g,"").trim()});}catch{}
+   try{out.push({url:new URL(m[2],baseUrl).href,text:m[3].replace(/<[^>]+>/g,"").trim()});}catch{}
   }
   return out;
  }
