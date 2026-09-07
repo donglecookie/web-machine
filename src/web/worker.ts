@@ -16,7 +16,10 @@ import {discoverAndFetch} from "../discover.js";
 type JobRequest={query:string;targetUrl?:string};
 type JobResponse={ok:boolean;result:unknown};
 
-process.on("message",async(msg:JobRequest)=>{
+// Deliberately `once`, not `on`: this worker handles exactly one job and exits - `once` makes
+// that guarantee structural (a second message, however it arrived, is simply ignored) rather
+// than relying on process.exit() to happen fast enough to prevent a second handler run.
+process.once("message",async(msg:JobRequest)=>{
  let machine:WebMachine|undefined;
  let response:JobResponse;
  try{

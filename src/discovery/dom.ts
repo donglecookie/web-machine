@@ -55,6 +55,12 @@ const EVAL_SOURCE=`(() => {
     return e.offsetWidth > 0 || e.offsetHeight > 0 || e.getClientRects().length > 0;
   }
   function add(kind, e, url) {
+    // Applied once here for every candidate kind, not just iframe/embed/object at their call
+    // sites: an ordinary <a href> or [download] pointing at an ad/tracking domain (a link
+    // wrapping an ad banner, say) is exactly the same problem - a candidate whose only real
+    // effect is following a business we never want to click, whether it renders as a frame or
+    // a plain link.
+    if (url && isAdUrl(url)) return;
     if (!isVisible(e)) return;
     let text = (e.innerText || e.textContent || e.getAttribute("aria-label") || e.title || "").trim().replace(/\\s+/g, " ").slice(0, 300);
     if (text.length > 0 && text.length <= 6) {
@@ -73,8 +79,8 @@ const EVAL_SOURCE=`(() => {
   document.querySelectorAll('a[href],[download],button,[role=button],[role=tab],[tabindex="0"],iframe[src],embed[src],object[data]').forEach((e) => {
     if (e.hasAttribute("download")) add("download", e, e.href || e.getAttribute("href"));
     else if (e.tagName === "A") add("link", e, e.href);
-    else if (e.tagName === "IFRAME" || e.tagName === "EMBED") { if (!isAdUrl(e.src)) add("frame", e, e.src); }
-    else if (e.tagName === "OBJECT") { const d = e.getAttribute("data"); if (!isAdUrl(d)) add("frame", e, d); }
+    else if (e.tagName === "IFRAME" || e.tagName === "EMBED") add("frame", e, e.src);
+    else if (e.tagName === "OBJECT") add("frame", e, e.getAttribute("data"));
     else add("button", e);
   });
   return a;

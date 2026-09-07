@@ -50,13 +50,13 @@ function runSearchInWorker(jobId:string,query:string,targetUrl:string|undefined)
  };
  child.on("message",(msg:{ok:boolean;result:unknown})=>finish(msg.ok?"done":"error",msg.result));
  child.on("error",e=>finish("error",{ok:false,message:`worker failed to start: ${e.message}`}));
- child.on("exit",code=>{
+ child.on("exit",(code,signal)=>{
   // A worker that already reported its result via 'message' calls process.exit(0) itself
   // right after - finish() already ran and set a real status, so this exit is expected and a
   // no-op here (finish() only acts while status is still "running"). This branch is what
   // catches the case the message never arrived at all: whatever went wrong, it stayed
   // entirely inside the worker's own process.
-  if(code!==0)finish("error",{ok:false,message:`worker process exited unexpectedly (code ${code})`});
+  if(code!==0)finish("error",{ok:false,message:signal?`worker process was killed by signal ${signal}`:`worker process exited unexpectedly (code ${code})`});
  });
  child.send({query,targetUrl});
 }
@@ -168,7 +168,13 @@ const server=http.createServer(async(req,res)=>{
   if(req.method==="POST"&&req.url==="/api/run"){
    const chunks:Buffer[]=[];
    for await(const chunk of req)chunks.push(chunk as Buffer);
-   const body=JSON.parse(Buffer.concat(chunks).toString("utf-8")||"{}");
+   let body:{query?:unknown;url?:unknown};
+   try{body=JSON.parse(Buffer.concat(chunks).toString("utf-8")||"{}");}
+   catch{
+    res.writeHead(400,{"Content-Type":"application/json"});
+    res.end(JSON.stringify({message:"invalid JSON body"}));
+    return;
+   }
    const query=typeof body.query==="string"?body.query.trim():"";
    const targetUrl=(typeof body.url==="string"?body.url.trim():"")||undefined;
    if(!query){
@@ -188,7 +194,7 @@ const server=http.createServer(async(req,res)=>{
    return;
   }
   if(req.method==="GET"&&req.url?.startsWith("/api/status/")){
-   const jobId=req.url.slice("/api/status/".length);
+   const jobId=req.url.slice("/api/status/".length).split("?")[0];
    const job=jobs.get(jobId);
    if(!job){
     res.writeHead(404,{"Content-Type":"application/json"});
