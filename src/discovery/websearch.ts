@@ -52,13 +52,23 @@ async function htmlSearch(engine:string,url:string,unwrap:(u:string)=>string,noi
  const seen=new Set<string>();
  const out:SearchResult[]=[];
  const allLinks=html.extractLinks(page,url);
+ // Per-stage counters, diagnostic only: extractLinks() finding links but htmlSearch() still
+ // returning zero doesn't say WHERE they were lost - noise() being too aggressive (e.g. an
+ // un-unwrapped redirect still pointing at the search engine's own domain) looks identical
+ // from outside to unwrap() itself failing, or every candidate genuinely lacking link text.
+ // Distinguishing them is what the next occurrence needs, rather than re-guessing again.
+ let droppedNoUrl=0,droppedNotHttp=0,droppedNoise=0,droppedDupe=0,droppedNoText=0;
  for(const link of allLinks){
   const u=unwrap(link.url);
-  if(!u||!/^https?:\/\//.test(u)||noise(u)||seen.has(u)||!link.text)continue;
+  if(!u){droppedNoUrl++;continue;}
+  if(!/^https?:\/\//.test(u)){droppedNotHttp++;continue;}
+  if(noise(u)){droppedNoise++;continue;}
+  if(seen.has(u)){droppedDupe++;continue;}
+  if(!link.text){droppedNoText++;continue;}
   seen.add(u);out.push({title:link.text,url:u});
   if(out.length>=8)break;
  }
- if(!out.length)logger.debug("search.no_matches",{engine,rawLinks:allLinks.length,pageLength:page.length});
+ if(!out.length)logger.debug("search.no_matches",{engine,rawLinks:allLinks.length,pageLength:page.length,droppedNoUrl,droppedNotHttp,droppedNoise,droppedDupe,droppedNoText,sampleUrls:allLinks.slice(0,5).map(l=>l.url)});
  return out;
 }
 
