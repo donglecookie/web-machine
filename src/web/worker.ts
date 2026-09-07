@@ -27,7 +27,7 @@ process.on("message",async(msg:JobRequest)=>{
    await machine.open(msg.targetUrl);
    result=await machine.fetch(msg.query,16);
   }else{
-   await machine.open("about:blank");
+   await machine.ensurePage();
    result=await discoverAndFetch(machine,stagehand,msg.query);
   }
   response={ok:true,result};

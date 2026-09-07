@@ -25,7 +25,7 @@ try{
  }else{
   console.log("QUERY:",query);
   console.log("No TEST_URL given — searching the web for a starting site...");
-  await machine.open("about:blank");
+  await machine.ensurePage();
   report(await discoverAndFetch(machine,stagehand,query));
  }
 }catch(e){

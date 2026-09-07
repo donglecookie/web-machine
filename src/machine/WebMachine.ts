@@ -51,15 +51,27 @@ export class WebMachine{
  private readonly html=new HtmlMachine();
  constructor(private readonly stagehand:Stagehand){}
  async open(url:string){
+  await this.ensurePage();
+  for(let attempt=0;attempt<2;attempt++){
+   try{await this.page.goto(url,{waitUntil:"domcontentloaded",timeout:30000});return;}
+   catch(e){if(attempt===1)throw e;}
+  }
+ }
+ // Grabs a usable page and applies the ad-domain block, without navigating anywhere. Split out
+ // of open() for callers that need SOME page handle but not a specific destination - notably
+ // discoverAndFetch(), which only needs machine.page to exist before it immediately navigates
+ // to the actual search engine URL itself. Routing that case through open("about:blank") first
+ // was observed in practice to produce CDP errors ("Inspected target navigated or closed")
+ // right as the very next real navigation started - about:blank is a real navigation with its
+ // own settle/instrumentation work, and starting a second navigation before that settles is a
+ // plausible source of exactly this race. Skipping the pointless middle destination avoids the
+ // race outright instead of tuning timing around it.
+ async ensurePage(){
   const pages=await this.stagehand.browser.context.pages();
   this.page=pages[pages.length-1]||this.page;
   if(!this.policySet){
    try{await this.stagehand.browser.context.setDomainPolicy({blockedDomains:BLOCKED_DOMAINS});}catch{}
    this.policySet=true;
-  }
-  for(let attempt=0;attempt<2;attempt++){
-   try{await this.page.goto(url,{waitUntil:"domcontentloaded",timeout:30000});return;}
-   catch(e){if(attempt===1)throw e;}
   }
  }
  private async downloadAndVerify(url:string,history:HistoryEntry[],fileType:ReturnType<typeof detectFileType>):Promise<FetchResult>{
