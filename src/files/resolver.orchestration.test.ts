@@ -208,3 +208,11 @@ test("syncActivePage falls back to the newest tab if the original one is genuine
  const result=await syncActivePage(stagehand,current as any);
  assert.equal(result.pageId,"newest");
 });
+
+test("syncActivePage does not throw when falling back to a page object without a url() method (regression: a diagnostic log call assumed url() always exists and crashed the whole function with a synchronous TypeError uncatchable by .catch() when it didn't)", async () => {
+ const current={pageId:"main"};
+ const newest={pageId:"newest"}; // deliberately no url() method
+ const stagehand:any={browser:{context:{pages:async()=>[newest]}}};
+ const result=await syncActivePage(stagehand,current as any);
+ assert.equal(result.pageId,"newest","should still return the fallback page, not silently keep the stale current one");
+});

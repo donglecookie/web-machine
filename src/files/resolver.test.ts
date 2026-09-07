@@ -148,3 +148,8 @@ test("shrinkCandidateCap never shrinks below its floor, even after repeated call
  assert.equal(cap.button,10);
  assert.equal(cap.link,5);
 });
+
+test("classifyObserveError recognizes a per-day token limit (TPD) as equivalent to exhausted credits (regression: the exact Groq TPD message hit in practice - 'try again in 19m2.208s' - was previously unclassified as 'other', causing the run to keep retrying and repeating the same rejection instead of giving up on the LLM path for the rest of the run)", () => {
+ const msg="Failed after 3 attempts. Last error: AI_APICallError: Rate limit reached for model `openai/gpt-oss-120b` in organization `org_x` service tier `on_demand` on tokens per day (TPD): Limit 200000, Used 196742, Requested 5902. Please try again in 19m2.208s.";
+ assert.equal(classifyObserveError(msg),"credits-exhausted");
+});

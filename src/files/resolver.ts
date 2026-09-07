@@ -134,7 +134,12 @@ export function pickFallbackCandidate(candidates:Candidate[],score:(c:Candidate)
 //   same oversized prompt would fail again - but IS fixable by sending a smaller prompt.
 export type ObserveErrorKind="credits-exhausted"|"request-too-large"|"other";
 export function classifyObserveError(message:string):ObserveErrorKind{
- if(/\b402\b|insufficient.*credit|requires more credits|payment required/i.test(message))return"credits-exhausted";
+ // A per-day token limit (TPD) is functionally identical to exhausted credits for THIS run's
+ // purposes even though the provider frames it differently - the message names a wait time in
+ // minutes ("try again in 19m2s"), far longer than worth blocking a single run on, so there's
+ // no meaningful difference from credits actually running out: retrying anyway just repeats
+ // the same rejection on every subsequent call for the rest of this run.
+ if(/\b402\b|insufficient.*credit|requires more credits|payment required|tokens per day|\bTPD\b/i.test(message))return"credits-exhausted";
  if(/request too large.*tokens per minute/i.test(message))return"request-too-large";
  return"other";
 }
@@ -223,7 +228,17 @@ export async function syncActivePage(stagehand:Stagehand,current:Page):Promise<P
     }
    }catch{}
   }
-  return pages[pages.length-1];
+  // The original tab is genuinely gone, not just accompanied by an extra one - closing OTHER
+  // tabs above can't help here, since there IS no "other" to distinguish from the original
+  // anymore. This is a real, if rarer, gap: a site that replaces its own tab's location
+  // (rather than opening a separate popup) looks identical to a legitimate same-tab
+  // navigation from here, so it can't be safely blocked without also blocking normal
+  // clicks. Logged explicitly so a future occurrence is diagnosable as THIS case
+  // specifically, rather than presenting as unexplained wrong-site candidates several steps
+  // later - which was hard to trace back to its actual cause in practice.
+  const fallback=pages[pages.length-1];
+  logger.warn("resolve.original_tab_lost",{fallbackUrl:await fallback?.url?.().catch(()=>"?")??"?"});
+  return fallback;
  }catch{return current;}
 }
 
