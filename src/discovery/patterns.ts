@@ -1,3 +1,16 @@
+// Ad/tracking domains, shared between WebMachine.ts (which blocks requests to these outright
+// via setDomainPolicy) and dom.ts (which must ALSO exclude them from the candidate scan
+// itself, not just block their network requests - an ad iframe still gets scanned as a
+// candidate even when its own request is blocked, and being cross-origin, every attempt to
+// read its accessibility tree/frame ownership fails with a CDP error; its URL, typically
+// hundreds of characters of tracking parameters, was also found to meaningfully inflate
+// prompt size when included as a candidate's url field).
+export const AD_DOMAINS=[
+ "googlesyndication.com","doubleclick.net","google-analytics.com","googletagmanager.com",
+ "adtrafficquality.google","fundingchoicesmessages.google.com","googleadservices.com",
+ "amazon-adsystem.com","facebook.net","connect.facebook.net"
+];
+
 export function sameHost(a:string,b:string):boolean{
  try{return new URL(a).hostname===new URL(b).hostname;}catch{return false;}
 }

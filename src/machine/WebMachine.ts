@@ -1,9 +1,5 @@
-import {resolve,newBudget,Budget,type HistoryEntry} from "../files/resolver.js";import {download} from "../files/download.js";import {verify} from "../verification/file.js";import {HtmlMachine} from "./HtmlMachine.js";import {tokenize,relevanceRatioTokens,detectFileType} from "../discovery/patterns.js";import type {Stagehand,Page} from "@browserbasehq/stagehand";
-const BLOCKED_DOMAINS=[
- "googlesyndication.com","doubleclick.net","google-analytics.com","googletagmanager.com",
- "adtrafficquality.google","fundingchoicesmessages.google.com","googleadservices.com",
- "amazon-adsystem.com","facebook.net","connect.facebook.net"
-];
+import {resolve,newBudget,Budget,type HistoryEntry} from "../files/resolver.js";import {download} from "../files/download.js";import {verify} from "../verification/file.js";import {HtmlMachine} from "./HtmlMachine.js";import {tokenize,relevanceRatioTokens,detectFileType,AD_DOMAINS} from "../discovery/patterns.js";import type {Stagehand,Page} from "@browserbasehq/stagehand";
+const BLOCKED_DOMAINS=AD_DOMAINS;
 const RELEVANCE_WARN_THRESHOLD=0.5;
 
 // What fetch() can actually return, kept accurate to what the code below produces (this was

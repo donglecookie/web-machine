@@ -1,7 +1,13 @@
-import {KEYWORD_RE,FileType,ANY_FILE_TYPE,relevanceRatioTokens} from "./patterns.js";
+import {KEYWORD_RE,FileType,ANY_FILE_TYPE,relevanceRatioTokens,AD_DOMAINS} from "./patterns.js";
 import type {Page} from "@browserbasehq/stagehand";
 export type Candidate={kind:string;text:string;url?:string;selector?:string;fallbackSelector?:string;score:number;nav:boolean};
 const EVAL_SOURCE=`(() => {
+  const AD_DOMAINS = ${JSON.stringify(AD_DOMAINS)};
+  function isAdUrl(url) {
+    if (!url) return false;
+    try { return AD_DOMAINS.some((d) => new URL(url, location.href).hostname.endsWith(d)); }
+    catch { return false; }
+  }
   const a = [];
   function cssPath(el) {
     if (el.id) return "#" + CSS.escape(el.id);
@@ -67,8 +73,8 @@ const EVAL_SOURCE=`(() => {
   document.querySelectorAll('a[href],[download],button,[role=button],[role=tab],[tabindex="0"],iframe[src],embed[src],object[data]').forEach((e) => {
     if (e.hasAttribute("download")) add("download", e, e.href || e.getAttribute("href"));
     else if (e.tagName === "A") add("link", e, e.href);
-    else if (e.tagName === "IFRAME" || e.tagName === "EMBED") add("frame", e, e.src);
-    else if (e.tagName === "OBJECT") add("frame", e, e.getAttribute("data"));
+    else if (e.tagName === "IFRAME" || e.tagName === "EMBED") { if (!isAdUrl(e.src)) add("frame", e, e.src); }
+    else if (e.tagName === "OBJECT") { const d = e.getAttribute("data"); if (!isAdUrl(d)) add("frame", e, d); }
     else add("button", e);
   });
   return a;
