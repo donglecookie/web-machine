@@ -9,6 +9,28 @@ const RESULTS_SCHEMA=z.object({
 });
 const html=new HtmlMachine();
 
+// DuckDuckGo's dedicated HTML endpoint (distinct from its normal JS-heavy site) renders full
+// results server-side with no JS required - a common choice specifically for automated/plain-
+// HTTP access, unlike Bing/Google which were confirmed in practice to serve a results-free
+// page to a plain HTTP request (Bing: every link on the page pointed back at bing.com itself,
+// none to any actual result; Google: the page was literally an "enable JavaScript" notice).
+// Wraps outbound links in "//duckduckgo.com/l/?uddg=<url-encoded-real-url>&..." to strip
+// referrer info; unwrap it the same way as Bing/Google's own redirect wrappers.
+function unwrapDuckDuckGoRedirect(href:string):string{
+ try{
+  const u=new URL(href,"https://duckduckgo.com");
+  if(/(^|\.)duckduckgo\.com$/.test(u.hostname)&&u.pathname==="/l/"){
+   const real=u.searchParams.get("uddg");
+   if(real&&/^https?:\/\//.test(real))return real;
+  }
+ }catch{}
+ return href;
+}
+function isDuckDuckGoNoise(url:string):boolean{
+ try{return /(^|\.)duckduckgo\.com$/.test(new URL(url).hostname);}
+ catch{return true;}
+}
+
 // Bing wraps organic result links in a /ck/a?...&u=a1<base64url> click-tracking redirect;
 // unwrap it to get the real destination.
 function unwrapBingRedirect(href:string):string{
@@ -110,7 +132,10 @@ export async function searchWeb(page:Page,stagehand:Stagehand,query:string):Prom
  const google=await htmlSearch("Google",`https://www.google.com/search?q=${encodeURIComponent(query)}&num=10`,unwrapGoogleRedirect,isGoogleNoise);
  if(google.length)return google;
 
- logger.info("search.html_fetch_empty",{engines:"bing,google",fallback:"browser+llm extraction"});
+ const duckduckgo=await htmlSearch("DuckDuckGo",`https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`,unwrapDuckDuckGoRedirect,isDuckDuckGoNoise);
+ if(duckduckgo.length)return duckduckgo;
+
+ logger.info("search.html_fetch_empty",{engines:"bing,google,duckduckgo",fallback:"browser+llm extraction"});
  const results=await browserSearch(page,stagehand,query);
  if(!results.length){
   const title=await page.title().catch(()=>"?");
