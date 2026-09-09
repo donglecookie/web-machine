@@ -62,7 +62,11 @@ const EVAL_SOURCE=`(() => {
     // a plain link.
     if (url && isAdUrl(url)) return;
     if (!isVisible(e)) return;
-    let text = (e.innerText || e.textContent || e.getAttribute("aria-label") || e.title || "").trim().replace(/\\s+/g, " ").slice(0, 300);
+    // e.alt only exists on <img> elements (undefined elsewhere, so harmless for other kinds) -
+    // it's the single most relevant text signal an image carries, missing from this chain
+    // entirely before images were ever scanned, since no prior candidate kind had meaningful
+    // alt text to lose by its absence.
+    let text = (e.innerText || e.textContent || e.getAttribute("aria-label") || e.alt || e.title || "").trim().replace(/\\s+/g, " ").slice(0, 300);
     if (text.length > 0 && text.length <= 6) {
       const ctx = nearbyLabel(e);
       if (ctx && !text.includes(ctx)) text = ctx + " " + text;
@@ -76,9 +80,10 @@ const EVAL_SOURCE=`(() => {
       nav: Boolean(e.closest("nav,header")),
     });
   }
-  document.querySelectorAll('a[href],[download],button,[role=button],[role=tab],[tabindex="0"],iframe[src],embed[src],object[data]').forEach((e) => {
+  document.querySelectorAll('a[href],[download],button,[role=button],[role=tab],[tabindex="0"],iframe[src],embed[src],object[data],img[src]').forEach((e) => {
     if (e.hasAttribute("download")) add("download", e, e.href || e.getAttribute("href"));
     else if (e.tagName === "A") add("link", e, e.href);
+    else if (e.tagName === "IMG") add("image", e, e.src);
     else if (e.tagName === "IFRAME" || e.tagName === "EMBED") add("frame", e, e.src);
     else if (e.tagName === "OBJECT") add("frame", e, e.getAttribute("data"));
     else add("button", e);
