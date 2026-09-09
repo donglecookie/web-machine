@@ -112,7 +112,7 @@ export async function inspect(page:Page,fileType:FileType=ANY_FILE_TYPE,instruct
   const s=x.text.toLowerCase();
   let score=0;
   if(KEYWORD_RE.test(s)||lowerAliases.some(a=>s.includes(a)))score+=60;
-  if(x.kind==="download")score+=40;
+  if(x.kind==="download"||x.kind==="image")score+=40; // both signal "this candidate likely IS the target file", not just a link toward it
   if(fileType.extRe.test(x.url||""))score+=100;
   if(instructionTokens.length)score+=relevanceRatioTokens(x.text,instructionTokens)*200;
   return{...x,score};

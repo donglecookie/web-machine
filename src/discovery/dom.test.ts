@@ -39,3 +39,14 @@ test("inspect returns an empty list for an empty scan", async () => {
  const candidates=await inspect(fakePage([]));
  assert.deepEqual(candidates,[]);
 });
+
+test("inspect gives an image candidate the same 'likely IS the target file' bonus as a download candidate, not just the extension-match bonus (regression: the bonus was download-kind-only, under-ranking an equally-matching image against an equally-matching download link)", async () => {
+ const fileType=detectFileType("스페인 선박 이미지");
+ const candidates=await inspect(fakePage([
+  {kind:"image",text:"스페인 선박",selector:"img1",url:"https://example.com/spain-ship.jpg",nav:false},
+  {kind:"download",text:"스페인 선박",selector:"dl1",url:"https://example.com/spain-ship.jpg",nav:false},
+ ]),fileType,["스페인","선박","이미지"]);
+ const image=candidates.find(c=>c.selector==="img1")!;
+ const download=candidates.find(c=>c.selector==="dl1")!;
+ assert.equal(image.score,download.score,"identical text/url/extension should score identically regardless of download vs image kind");
+});
